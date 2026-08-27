@@ -1,18 +1,9 @@
 {
   "name": "jfs-ai-whatsapp-cs",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
-  },
-  "dependencies": {
-    "@vitejs/plugin-react": "latest",
-    "vite": "latest",
-    "react": "latest",
-    "react-dom": "latest"
-  },
+  "scripts": {"dev":"vite","build":"vite build","preview":"vite preview"},
+  "dependencies": {"@supabase/supabase-js":"^2.57.4","@vitejs/plugin-react":"latest","vite":"latest","react":"latest","react-dom":"latest"},
   "devDependencies": {}
 }
