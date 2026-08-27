@@ -1,44 +1,16 @@
 import React, { useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { supabaseConfigured } from './lib/supabase';
 import './styles.css';
 
-const initialProducts = [
-  { name: 'Contoh Produk UMKM', price: 75000, stock: 'Tersedia', description: 'Produk contoh untuk mencoba AI CS.' }
-];
-
-function App() {
-  const [tab, setTab] = useState('home');
-  const [business, setBusiness] = useState({ name: 'Usaha Saya', description: 'Usaha UMKM Anda' });
-  const [products, setProducts] = useState(initialProducts);
-  const [faq, setFaq] = useState([{ q: 'Jam buka?', a: 'Senin–Sabtu, 08.00–20.00.' }]);
-  const [question, setQuestion] = useState('');
-  const [messages, setMessages] = useState([{ role: 'ai', text: 'Halo 👋 Saya AI Customer Service. Tanyakan tentang produk atau layanan usaha Anda.' }]);
-
-  const answer = useMemo(() => {
-    const q = question.toLowerCase();
-    const product = products.find(p => q.includes(p.name.toLowerCase()));
-    if (product) return `${product.name}: Rp${product.price.toLocaleString('id-ID')}. Status: ${product.stock}. ${product.description}`;
-    if (q.includes('harga') || q.includes('produk')) return `Saat ini ada ${products.length} produk. Silakan tanyakan nama produk yang ingin diketahui.`;
-    const foundFaq = faq.find(f => q.includes(f.q.replace('?', '').toLowerCase()));
-    if (foundFaq) return foundFaq.a;
-    return 'Maaf, saya belum memiliki informasi tersebut. Silakan hubungi admin untuk mendapatkan bantuan lebih lanjut.';
-  }, [question, products, faq]);
-
-  function send() {
-    if (!question.trim()) return;
-    setMessages(m => [...m, { role: 'user', text: question }, { role: 'ai', text: answer }]);
-    setQuestion('');
-  }
-
-  return <div className="app">
-    <header><div className="brand"><span>✦</span><div><b>JFS AI</b><small>WHATSAPP CS</small></div></div><span className="badge">MVP</span></header>
-    <main>
-      {tab === 'home' && <section className="hero"><div className="hero-copy"><p className="eyebrow">AI CUSTOMER SERVICE UNTUK UMKM</p><h1>Jawab pelanggan lebih cepat dengan <em>AI.</em></h1><p className="lead">Masukkan informasi usaha dan produk Anda. AI CS siap membantu menjawab pertanyaan pelanggan secara otomatis.</p><button onClick={() => setTab('dashboard')}>Mulai Atur AI CS →</button><div className="trust"><span>✓ Data produk</span><span>✓ FAQ usaha</span><span>✓ Siap dikembangkan ke WhatsApp</span></div></div><div className="preview"><div className="preview-top">AI CS Preview <span>● Online</span></div>{messages.slice(-4).map((m,i)=><div key={i} className={`bubble ${m.role}`}>{m.text}</div>)}<div className="input-row"><input value={question} onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>e.key==='Enter'&&send()} placeholder="Tanya tentang produk..."/><button onClick={send}>➤</button></div></div></section>}
-      {tab === 'dashboard' && <section className="panel"><div className="panel-head"><div><p className="eyebrow">PENGATURAN USAHA</p><h2>Knowledge Base AI CS</h2></div><button className="secondary" onClick={()=>setTab('chat')}>Tes AI →</button></div><div className="grid"><div className="card"><h3>Profil Usaha</h3><label>Nama usaha<input value={business.name} onChange={e=>setBusiness({...business,name:e.target.value})}/></label><label>Deskripsi<textarea value={business.description} onChange={e=>setBusiness({...business,description:e.target.value})}/></label></div><div className="card"><h3>Produk</h3>{products.map((p,i)=><div className="product" key={i}><b>{p.name}</b><span>Rp{p.price.toLocaleString('id-ID')}</span><small>{p.stock}</small></div>)}<button className="secondary" onClick={()=>setProducts([...products,{name:'Produk Baru',price:100000,stock:'Tersedia',description:'Deskripsi produk baru.'}])}>+ Tambah Produk</button></div><div className="card"><h3>FAQ</h3>{faq.map((f,i)=><div className="faq" key={i}><b>{f.q}</b><p>{f.a}</p></div>)}<button className="secondary" onClick={()=>setFaq([...faq,{q:'Cara pesan?',a:'Silakan hubungi admin untuk melakukan pemesanan.'}])}>+ Tambah FAQ</button></div></div></section>}
-      {tab === 'chat' && <section className="chat-page"><div className="panel-head"><div><p className="eyebrow">SIMULATOR</p><h2>Uji AI Customer Service</h2></div><button className="secondary" onClick={()=>setTab('dashboard')}>← Kembali</button></div><div className="chatbox">{messages.map((m,i)=><div key={i} className={`bubble ${m.role}`}>{m.text}</div>)}</div><div className="composer"><input value={question} onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>e.key==='Enter'&&send()} placeholder="Contoh: berapa harga Contoh Produk UMKM?"/><button onClick={send}>Kirim</button></div><p className="notice">MVP: jawaban saat ini menggunakan data demo lokal. WhatsApp API dan AI model akan disambungkan pada tahap berikutnya.</p></section>}
-    </main>
-    <nav><button className={tab==='home'?'active':''} onClick={()=>setTab('home')}>⌂<span>Beranda</span></button><button className={tab==='dashboard'?'active':''} onClick={()=>setTab('dashboard')}>▣<span>Data Usaha</span></button><button className={tab==='chat'?'active':''} onClick={()=>setTab('chat')}>✦<span>AI CS</span></button></nav>
-  </div>
-}
-
-createRoot(document.getElementById('root')).render(<App />);
+const initialProducts = [{ name:'Contoh Produk UMKM', price:75000, stock:'Tersedia', description:'Produk contoh untuk mencoba AI CS.' }];
+function App(){
+ const [tab,setTab]=useState('home'),[business,setBusiness]=useState({name:'Usaha Saya',description:'Usaha UMKM Anda'}),[products,setProducts]=useState(initialProducts),[faq,setFaq]=useState([{q:'Jam buka?',a:'Senin–Sabtu, 08.00–20.00.'}]),[question,setQuestion]=useState(''),[messages,setMessages]=useState([{role:'ai',text:'Halo 👋 Saya AI Customer Service. Tanyakan tentang produk atau layanan usaha Anda.'}]);
+ const answer=useMemo(()=>{const q=question.toLowerCase();const p=products.find(x=>q.includes(x.name.toLowerCase()));if(p)return `${p.name}: Rp${p.price.toLocaleString('id-ID')}. Status: ${p.stock}. ${p.description}`;if(q.includes('harga')||q.includes('produk'))return `Saat ini ada ${products.length} produk. Silakan tanyakan nama produk yang ingin diketahui.`;const f=faq.find(x=>q.includes(x.q.replace('?','').toLowerCase()));if(f)return f.a;return 'Maaf, saya belum memiliki informasi tersebut. Silakan hubungi admin untuk mendapatkan bantuan lebih lanjut.'},[question,products,faq]);
+ function send(){if(!question.trim())return;setMessages(m=>[...m,{role:'user',text:question},{role:'ai',text:answer}]);setQuestion('')}
+ return <div className="app"><header><div className="brand"><span>✦</span><div><b>JFS AI</b><small>WHATSAPP CS</small></div></div><span className="badge">{supabaseConfigured?'DATABASE CONNECTED':'MVP'}</span></header><main>
+ {tab==='home'&&<section className="hero"><div className="hero-copy"><p className="eyebrow">AI CUSTOMER SERVICE UNTUK UMKM</p><h1>Jawab pelanggan lebih cepat dengan <em>AI.</em></h1><p className="lead">Masukkan informasi usaha dan produk Anda. AI CS siap membantu menjawab pertanyaan pelanggan secara otomatis.</p><button onClick={()=>setTab('dashboard')}>Mulai Atur AI CS →</button><div className="trust"><span>✓ Data produk</span><span>✓ FAQ usaha</span><span>✓ Siap dikembangkan ke WhatsApp</span></div></div><div className="preview"><div className="preview-top">AI CS Preview <span>● Online</span></div>{messages.slice(-4).map((m,i)=><div key={i} className={`bubble ${m.role}`}>{m.text}</div>)}<div className="input-row"><input value={question} onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>e.key==='Enter'&&send()} placeholder="Tanya tentang produk..."/><button onClick={send}>➤</button></div></div></section>}
+ {tab==='dashboard'&&<section className="panel"><div className="panel-head"><div><p className="eyebrow">PENGATURAN USAHA</p><h2>Knowledge Base AI CS</h2></div><button className="secondary" onClick={()=>setTab('chat')}>Tes AI →</button></div><div className="grid"><div className="card"><h3>Profil Usaha</h3><label>Nama usaha<input value={business.name} onChange={e=>setBusiness({...business,name:e.target.value})}/></label><label>Deskripsi<textarea value={business.description} onChange={e=>setBusiness({...business,description:e.target.value})}/></label></div><div className="card"><h3>Produk</h3>{products.map((p,i)=><div className="product" key={i}><b>{p.name}</b><span>Rp{p.price.toLocaleString('id-ID')}</span><small>{p.stock}</small></div>)}<button className="secondary" onClick={()=>setProducts([...products,{name:'Produk Baru',price:100000,stock:'Tersedia',description:'Deskripsi produk baru.'}])}>+ Tambah Produk</button></div><div className="card"><h3>FAQ</h3>{faq.map((f,i)=><div className="faq" key={i}><b>{f.q}</b><p>{f.a}</p></div>)}<button className="secondary" onClick={()=>setFaq([...faq,{q:'Cara pesan?',a:'Silakan hubungi admin untuk melakukan pemesanan.'}])}>+ Tambah FAQ</button></div></div></section>}
+ {tab==='chat'&&<section className="chat-page"><div className="panel-head"><div><p className="eyebrow">SIMULATOR</p><h2>Uji AI Customer Service</h2></div><button className="secondary" onClick={()=>setTab('dashboard')}>← Kembali</button></div><div className="chatbox">{messages.map((m,i)=><div key={i} className={`bubble ${m.role}`}>{m.text}</div>)}</div><div className="composer"><input value={question} onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>e.key==='Enter'&&send()} placeholder="Contoh: berapa harga Contoh Produk UMKM?"/><button onClick={send}>Kirim</button></div><p className="notice">{supabaseConfigured?'Supabase terdeteksi. Penyimpanan data akan diaktifkan pada tahap berikutnya.':'MVP: data masih lokal. Tambahkan VITE_SUPABASE_URL dan VITE_SUPABASE_ANON_KEY saat backend siap.'}</p></section>}
+ </main><nav><button className={tab==='home'?'active':''} onClick={()=>setTab('home')}>⌂<span>Beranda</span></button><button className={tab==='dashboard'?'active':''} onClick={()=>setTab('dashboard')}>▣<span>Data Usaha</span></button><button className={tab==='chat'?'active':''} onClick={()=>setTab('chat')}>✦<span>AI CS</span></button></nav></div>}
+createRoot(document.getElementById('root')).render(<App/>);
