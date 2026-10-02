@@ -40,3 +40,10 @@ create index if not exists jfs_marketplace_matches_lead_rank_idx on public.jfs_m
 create policy jfs_marketplace_leads_tenant_manage on public.jfs_marketplace_leads for all to authenticated using (public.jfs_user_can_manage_tenant(tenant_id)) with check (public.jfs_user_can_manage_tenant(tenant_id));
 
 create policy jfs_marketplace_matches_tenant_manage on public.jfs_marketplace_matches for all to authenticated using (exists (select 1 from public.jfs_marketplace_leads l where l.id = lead_id and public.jfs_user_can_manage_tenant(l.tenant_id))) with check (exists (select 1 from public.jfs_marketplace_leads l where l.id = lead_id and public.jfs_user_can_manage_tenant(l.tenant_id)));
+
+-- Keep the selected match tied to the match set once both tables exist.
+alter table public.jfs_marketplace_leads
+  drop constraint if exists jfs_marketplace_leads_selected_match_fk;
+alter table public.jfs_marketplace_leads
+  add constraint jfs_marketplace_leads_selected_match_fk
+  foreign key (selected_match_id) references public.jfs_marketplace_matches(id) on delete set null;
