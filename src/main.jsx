@@ -1,6 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { supabaseConfigured } from './lib/supabase';
+import { supabase, supabaseConfigured } from './lib/supabase';
 import './styles.css';
 
 const initialProducts = [
@@ -31,12 +31,41 @@ function App() {
   const [waConnected, setWaConnected] = useState(false);
   const [waNumber, setWaNumber] = useState('');
   const [notice, setNotice] = useState('');
+  const [tenantState, setTenantState] = useState('loading');
+  const [tenantCode, setTenantCode] = useState(new URLSearchParams(window.location.search).get('tenant') || new URLSearchParams(window.location.search).get('id') || '');
+  const [tenantId, setTenantId] = useState(null);
+  const [dataNotice, setDataNotice] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadTenantData() {
+      if (!supabase) { setTenantState('demo'); setDataNotice('Supabase belum dikonfigurasi. Data yang tampil adalah contoh demo.'); return; }
+      if (!tenantCode.trim()) { setTenantState('demo'); setDataNotice('Mode demo. Tambahkan ?tenant=KODE_TENANT pada URL untuk memuat data bisnis aktif.'); return; }
+      setTenantState('loading');
+      const { data: tenant, error: tenantError } = await supabase.from('tenants').select('id,tenant_code,business_name,business_type,description,address,city,province,phone,whatsapp,status,ai_enabled').eq('tenant_code', tenantCode.trim()).in('status', ['active','trial']).maybeSingle();
+      if (cancelled) return;
+      if (tenantError || !tenant) { setTenantState('error'); setDataNotice('Data tenant tidak ditemukan atau belum dapat diakses. Periksa kode tenant dan status bisnis.'); return; }
+      setTenantId(tenant.id);
+      setBusiness({ name: tenant.business_name || 'Usaha', description: tenant.description || tenant.business_type || 'Informasi usaha', hours: 'Jam operasional belum tersedia di database.', location: [tenant.address, tenant.city, tenant.province].filter(Boolean).join(', ') || 'Alamat belum tersedia di database.' });
+      const [{ data: dbProducts, error: productError }, { data: knowledge, error: knowledgeError }] = await Promise.all([
+        supabase.from('products').select('id,name,price,description,category,brand').eq('tenant_id', tenant.id).eq('is_active', true).order('name'),
+        supabase.from('jfs_knowledge').select('id,category,title,content').eq('tenant_id', tenant.id).eq('is_active', true).order('category')
+      ]);
+      if (cancelled) return;
+      if (!productError) setProducts((dbProducts || []).map(p => ({ id: p.id, name: p.name, price: Number(p.price || 0), stock: null, description: p.description || p.category || p.brand || 'Deskripsi belum tersedia.' })));
+      if (!knowledgeError && knowledge?.length) setFaq(knowledge.map(k => ({ id: k.id, q: k.title, a: k.content })));
+      setTenantState('connected');
+      setDataNotice(`Terhubung ke data tenant ${tenant.tenant_code}. Mode baca saja; perubahan data bisnis memerlukan login dan izin admin.`);
+    }
+    loadTenantData();
+    return () => { cancelled = true; };
+  }, [tenantCode]);
 
   const answer = useMemo(() => {
     const q = question.trim().toLowerCase();
     if (!q) return '';
     const product = products.find(p => q.includes(p.name.toLowerCase()));
-    if (product) return `${product.name}: Rp${product.price.toLocaleString('id-ID')}. Stok: ${product.stock} unit. ${product.description}`;
+    if (product) return `${product.name}: Rp${product.price.toLocaleString('id-ID')}.${product.stock == null ? '' : ` Stok: ${product.stock} unit.`} ${product.description}`;
     if (q.includes('harga') || q.includes('produk')) return `Saat ini tersedia ${products.length} produk. Silakan tanyakan nama produk yang ingin diketahui.`;
     if (q.includes('jam') || q.includes('buka')) return business.hours;
     if (q.includes('lokasi') || q.includes('alamat')) return business.location;
@@ -78,7 +107,7 @@ function App() {
           <span className="brand-mark">✦</span>
           <span><b>JFS AI</b><small>WHATSAPP BUSINESS AI</small></span>
         </button>
-        <div className="top-status"><span className="dot" /> {supabaseConfigured ? 'Supabase siap' : 'MVP / Demo'}</div>
+        <div className="top-status"><span className="dot" /> {tenantState === 'connected' ? 'Data bisnis terhubung' : tenantState === 'loading' && supabaseConfigured ? 'Memuat data bisnis…' : 'Mode Demo'}</div>
       </header>
 
       <main className="shell">
@@ -114,11 +143,11 @@ function App() {
               <div className="composer"><input value={question} onChange={e => setQuestion(e.target.value)} onKeyDown={e => e.key === 'Enter' && send()} placeholder="Contoh: berapa harga Contoh Produk UMKM?"/><button className="primary" onClick={send}>Kirim</button></div>
             </div>
             <div className="panel">
-              <div className="panel-title"><b>Sumber informasi AI</b></div>
+              <div className="panel-title"><b>Sumber informasi AI</b><span className={tenantState === 'connected' ? 'online' : 'status-off'}>{tenantState === 'connected' ? '● Data database' : '● Data demo'}</span></div>
               <div className="source-card"><strong>Produk & Harga</strong><small>{products.length} produk tersedia</small>{products.map(p => <div className="mini-row" key={p.id}><span>{p.name}</span><b>Rp{p.price.toLocaleString('id-ID')}</b></div>)}</div>
               <div className="source-card"><strong>Informasi Usaha</strong><small>{business.hours} • {business.location}</small></div>
               <div className="source-card"><strong>FAQ</strong><small>{faq.length} pertanyaan umum tersimpan</small></div>
-              <div className="safe-note">🛡️ Jika informasi tidak tersedia, AI diarahkan untuk tidak mengarang dan menawarkan bantuan admin.</div>
+              <div className="safe-note">🛡️ Jika informasi tidak tersedia, AI diarahkan untuk tidak mengarang dan menawarkan bantuan admin.</div>{dataNotice && <div className="notice" role="status">{dataNotice}</div>}
             </div>
           </div>
         </section>}
@@ -130,9 +159,9 @@ function App() {
           <div className="automation-examples"><div><b>💬 Menjawab chat</b><span>AI Customer Service menangani pertanyaan pelanggan.</span></div><div><b>🛒 Menerima pesanan</b><span>Pesanan dapat diteruskan ke order engine JFS AI.</span></div><div><b>📝 Mencatat kebutuhan</b><span>Data percakapan dapat disimpan sebagai customer context.</span></div><div><b>⏰ Mengingatkan</b><span>Automation berjalan berdasarkan trigger dan waktu.</span></div><div><b>🔄 Follow-up</b><span>Kirim pesan lanjutan setelah kondisi terpenuhi.</span></div></div>
         </section>}
 
-        {tab === 'business' && <section className="page"><div className="page-head"><div><span className="eyebrow">DATA BISNIS</span><h2>Knowledge Base</h2><p>Data ini menjadi sumber jawaban AI.</p></div><button className="secondary" onClick={() => setTab('home')}>← Dashboard</button></div><div className="grid2"><div className="panel"><div className="field"><label>Nama usaha</label><input value={business.name} onChange={e => setBusiness({ ...business, name: e.target.value })}/></div><div className="field"><label>Deskripsi</label><textarea value={business.description} onChange={e => setBusiness({ ...business, description: e.target.value })}/></div><div className="field"><label>Jam buka</label><input value={business.hours} onChange={e => setBusiness({ ...business, hours: e.target.value })}/></div><div className="field"><label>Lokasi</label><input value={business.location} onChange={e => setBusiness({ ...business, location: e.target.value })}/></div></div><div className="panel"><div className="panel-title"><b>Produk</b><button className="secondary" onClick={() => setProducts([...products, { id: Date.now(), name: 'Produk Baru', price: 100000, stock: 5, description: 'Deskripsi produk baru.' }])}>+ Produk</button></div>{products.map(p => <div className="product-row" key={p.id}><div><b>{p.name}</b><small>{p.description}</small></div><span>Rp{p.price.toLocaleString('id-ID')} • stok {p.stock}</span></div>)}<div className="panel-title faq-title"><b>FAQ</b><button className="secondary" onClick={() => setFaq([...faq, { id: Date.now(), q: 'Pertanyaan baru?', a: 'Jawaban baru.' }])}>+ FAQ</button></div>{faq.map(f => <div className="faq-row" key={f.id}><b>{f.q}</b><span>{f.a}</span></div>)}</div></div></section>}
+        {tab === 'business' && <section className="page"><div className="page-head"><div><span className="eyebrow">DATA BISNIS</span><h2>Knowledge Base</h2><p>Data ini menjadi sumber jawaban AI.</p>{tenantState === 'connected' && <small>Tenant: {tenantCode} · baca saja</small>}</div><button className="secondary" onClick={() => setTab('home')}>← Dashboard</button></div><div className="grid2"><div className="panel"><div className="safe-note">{tenantState === 'connected' ? 'Data diambil dari Supabase dan ditampilkan dalam mode baca saja.' : 'Mode demo: perubahan di halaman ini hanya tersimpan sementara di browser.'}</div><div className="field"><label>Nama usaha</label><input value={business.name} onChange={e => setBusiness({ ...business, name: e.target.value })}/></div><div className="field"><label>Deskripsi</label><textarea value={business.description} onChange={e => setBusiness({ ...business, description: e.target.value })}/></div><div className="field"><label>Jam buka</label><input value={business.hours} onChange={e => setBusiness({ ...business, hours: e.target.value })}/></div><div className="field"><label>Lokasi</label><input value={business.location} onChange={e => setBusiness({ ...business, location: e.target.value })}/></div></div><div className="panel"><div className="panel-title"><b>Produk</b>{tenantState !== 'connected' && <button className="secondary" onClick={() => setProducts([...products, { id: Date.now(), name: 'Produk Baru', price: 100000, stock: 5, description: 'Deskripsi produk baru.' }])}>+ Produk demo</button>}</div>{products.map(p => <div className="product-row" key={p.id}><div><b>{p.name}</b><small>{p.description}</small></div><span>Rp{p.price.toLocaleString('id-ID')}{p.stock == null ? ' • stok tidak ditampilkan' : ` • stok ${p.stock}`}</span></div>)}<div className="panel-title faq-title"><b>FAQ / Knowledge</b>{tenantState !== 'connected' && <button className="secondary" onClick={() => setFaq([...faq, { id: Date.now(), q: 'Pertanyaan baru?', a: 'Jawaban baru.' }])}>+ FAQ demo</button>}</div>{faq.map(f => <div className="faq-row" key={f.id}><b>{f.q}</b><span>{f.a}</span></div>)}</div></div></section>}
 
-        {tab === 'whatsapp' && <section className="page"><div className="page-head"><div><span className="eyebrow">CHANNEL</span><h2>WhatsApp Business</h2><p>Konfigurasi channel untuk tahap integrasi backend.</p></div><button className="secondary" onClick={() => setTab('home')}>← Dashboard</button></div><div className="panel connection"><div className="connection-status"><span className={waConnected ? 'status-good' : 'status-off'}>{waConnected ? '● Terhubung (demo)' : '○ Belum terhubung'}</span></div><div className="field"><label>Nomor WhatsApp Business</label><input value={waNumber} onChange={e => setWaNumber(e.target.value)} placeholder="628xxxxxxxxxx"/></div><button className="primary" onClick={connectWhatsApp}>{waConnected ? 'Perbarui konfigurasi' : 'Simpan konfigurasi'}</button>{notice && <div className="notice">{notice}</div>}<div className="integration-note"><b>Siap diintegrasikan ke JFS AI Platform</b><span>Frontend ini tidak menyimpan token rahasia. Webhook, WhatsApp Cloud API, AI provider, database, dan RLS harus dijalankan di backend/Edge Functions saat tahap produksi.</span></div></div></section>}
+        {tab === 'whatsapp' && <section className="page"><div className="page-head"><div><span className="eyebrow">CHANNEL</span><h2>WhatsApp Business</h2><p>Konfigurasi channel untuk tahap integrasi backend.</p></div><button className="secondary" onClick={() => setTab('home')}>← Dashboard</button></div><div className="panel connection"><div className="connection-status"><span className={waConnected ? 'status-good' : 'status-off'}>{waConnected ? '● Terhubung (demo)' : '○ Belum terhubung'}</span></div><div className="field"><label>Nomor WhatsApp Business</label><input value={waNumber} onChange={e => setWaNumber(e.target.value)} placeholder="628xxxxxxxxxx"/></div><button className="primary" onClick={connectWhatsApp}>{waConnected ? 'Perbarui konfigurasi demo' : 'Simpan konfigurasi demo'}</button>{notice && <div className="notice">{notice}</div>}<div className="integration-note"><b>Siap diintegrasikan ke JFS AI Platform</b><span>Frontend ini tidak menyimpan token rahasia. Webhook, WhatsApp Cloud API, AI provider, database, dan RLS harus dijalankan di backend/Edge Functions saat tahap produksi.</span></div></div></section>}
       </main>
 
       <nav className="bottom-nav">
