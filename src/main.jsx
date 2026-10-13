@@ -85,7 +85,7 @@ function App() {
         return;
       }
       setAccessState(subscriptionStatus);
-      const { data: tenantRows, error: tenantError } = await supabase.rpc('jfs_public_customer_service_tenant', { p_tenant_code: tenantCode.trim() });
+      const { data: tenantRows, error: tenantError } = await supabase.rpc('jfs_owner_customer_service_tenant', { p_tenant_code: tenantCode.trim() });
       const tenant = Array.isArray(tenantRows) ? tenantRows[0] : tenantRows;
       if (cancelled) return;
       if (tenantError || !tenant) {
@@ -99,8 +99,8 @@ function App() {
       setTenantId(tenant.id);
       setBusiness({ name: tenant.business_name || 'Usaha', description: tenant.business_type || 'Informasi usaha', hours: 'Jam operasional belum tersedia di database.', location: [tenant.address, tenant.city, tenant.province].filter(Boolean).join(', ') || 'Alamat belum tersedia di database.' });
       const [{ data: dbProducts, error: productError }, { data: knowledge, error: knowledgeError }] = await Promise.all([
-        supabase.rpc('jfs_public_customer_service_products', { p_tenant_code: tenant.tenant_code }),
-        supabase.rpc('jfs_public_customer_service_knowledge', { p_tenant_code: tenant.tenant_code })
+        supabase.rpc('jfs_owner_customer_service_products', { p_tenant_code: tenant.tenant_code }),
+        supabase.rpc('jfs_owner_customer_service_knowledge', { p_tenant_code: tenant.tenant_code })
       ]);
       if (cancelled) return;
       setProducts(!productError ? (dbProducts || []).map(p => ({ id: p.id, name: p.name, price: Number(p.price || 0), stock: null, description: p.description || p.category || p.brand || 'Deskripsi belum tersedia.' })) : []);
