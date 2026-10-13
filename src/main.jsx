@@ -73,6 +73,18 @@ function App() {
         setDataNotice('Tenant nyata hanya tersedia setelah login melalui JFS AI Platform.');
         return;
       }
+      const { data: tenantRows, error: tenantError } = await supabase.rpc('jfs_owner_customer_service_tenant', { p_tenant_code: tenantCode.trim() });
+      const tenant = Array.isArray(tenantRows) ? tenantRows[0] : tenantRows;
+      if (cancelled) return;
+      if (tenantError || !tenant) {
+        setAccessState('tenant-denied');
+        setProducts([]);
+        setFaq([]);
+        setBusiness({ name: 'Akses tenant ditolak', description: 'Akun ini tidak terdaftar sebagai pengelola tenant yang diminta.', hours: '—', location: '—' });
+        setTenantState('error');
+        setDataNotice('Tenant tidak ditemukan atau akun Anda tidak memiliki akses pengelola. Trial tidak dimulai.');
+        return;
+      }
       const { data: subscriptionRows, error: subscriptionError } = await supabase.rpc('jfs_get_my_app_subscription', { p_app_code: 'WHATSAPP-CS' });
       if (cancelled) return;
       const subscription = Array.isArray(subscriptionRows) ? subscriptionRows[0] : subscriptionRows;
@@ -85,17 +97,6 @@ function App() {
         return;
       }
       setAccessState(subscriptionStatus);
-      const { data: tenantRows, error: tenantError } = await supabase.rpc('jfs_owner_customer_service_tenant', { p_tenant_code: tenantCode.trim() });
-      const tenant = Array.isArray(tenantRows) ? tenantRows[0] : tenantRows;
-      if (cancelled) return;
-      if (tenantError || !tenant) {
-        setProducts([]);
-        setFaq([]);
-        setBusiness({ name: 'Tenant tidak tersedia', description: 'Data bisnis tidak dapat diakses.', hours: 'Jam operasional tidak tersedia.', location: 'Alamat tidak tersedia.' });
-        setTenantState('error');
-        setDataNotice('Data tenant tidak ditemukan atau belum dapat diakses. Data demo tidak digunakan untuk menjawab pelanggan. Periksa kode tenant dan status bisnis.');
-        return;
-      }
       setTenantId(tenant.id);
       setBusiness({ name: tenant.business_name || 'Usaha', description: tenant.business_type || 'Informasi usaha', hours: 'Jam operasional belum tersedia di database.', location: [tenant.address, tenant.city, tenant.province].filter(Boolean).join(', ') || 'Alamat belum tersedia di database.' });
       const [{ data: dbProducts, error: productError }, { data: knowledge, error: knowledgeError }] = await Promise.all([
@@ -155,12 +156,14 @@ function App() {
   const activeAutomationCount = automations.filter(a => a.active).length;
 
   if (tenantCode.trim() && !['trial', 'active', 'expiring'].includes(accessState)) {
-    const gateTitle = accessState === 'checking' ? 'Memeriksa akses aplikasi…' : accessState === 'login' ? 'Login diperlukan' : 'Subscription diperlukan';
+    const gateTitle = accessState === 'checking' ? 'Memeriksa akses aplikasi…' : accessState === 'login' ? 'Login diperlukan' : accessState === 'tenant-denied' ? 'Akses tenant ditolak' : 'Subscription diperlukan';
     const gateMessage = accessState === 'checking'
-      ? 'Memeriksa sesi JFS AI dan status trial/subscription.'
+      ? 'Memeriksa sesi JFS AI, akses tenant, dan status trial/subscription.'
       : accessState === 'login'
         ? 'Masuk melalui JFS AI Platform terlebih dahulu. Sesi login platform akan digunakan untuk memeriksa akses WhatsApp CS.'
-        : 'Tenant bisnis tidak dapat dibuka sebelum trial atau subscription JFS AI WhatsApp CS aktif.';
+        : accessState === 'tenant-denied'
+          ? 'Akun ini bukan pengelola tenant yang diminta. Trial tidak dimulai dan data tenant tidak ditampilkan.'
+          : 'Tenant bisnis tidak dapat dibuka sebelum trial atau subscription JFS AI WhatsApp CS aktif.';
     return (
       <div className="app">
         <header className="topbar"><div className="brand"><span className="brand-mark">✦</span><span><b>JFS AI</b><small>WHATSAPP BUSINESS AI</small></span></div></header>
