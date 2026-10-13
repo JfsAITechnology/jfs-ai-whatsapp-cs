@@ -32,6 +32,7 @@ function App() {
   const [waNumber, setWaNumber] = useState('');
   const [notice, setNotice] = useState('');
   const [tenantState, setTenantState] = useState('loading');
+  const [accessState, setAccessState] = useState('checking');
   const [tenantCode, setTenantCode] = useState(new URLSearchParams(window.location.search).get('tenant') || new URLSearchParams(window.location.search).get('id') || '');
   const [tenantId, setTenantId] = useState(null);
   const [dataNotice, setDataNotice] = useState('');
@@ -39,8 +40,9 @@ function App() {
   useEffect(() => {
     let cancelled = false;
     async function loadTenantData() {
-      if (!supabase) { setTenantState('demo'); setDataNotice('Supabase belum dikonfigurasi. Data yang tampil adalah contoh demo.'); return; }
       if (!tenantCode.trim()) {
+        setAccessState('demo');
+        if (!supabase) { setTenantState('demo'); setDataNotice('Supabase belum dikonfigurasi. Data yang tampil adalah contoh demo.'); return; }
         setTenantState('demo');
         setBusiness({ name: 'Usaha Saya', description: 'Usaha UMKM Anda', hours: 'Senin–Sabtu, 08.00–20.00', location: 'Alamat usaha Anda' });
         setProducts(initialProducts);
@@ -48,11 +50,41 @@ function App() {
         setDataNotice('Mode demo. Tambahkan ?tenant=KODE_TENANT pada URL untuk memuat data bisnis aktif.');
         return;
       }
+      if (!supabase) {
+        setAccessState('error');
+        setTenantState('error');
+        setProducts([]);
+        setFaq([]);
+        setDataNotice('Konfigurasi backend tidak tersedia. Data tenant nyata tidak dibuka.');
+        return;
+      }
+      setAccessState('checking');
       setTenantState('loading');
       setTenantId(null);
       setProducts([]);
       setFaq([]);
-      setDataNotice('Memuat data tenant…');
+      setDataNotice('Memeriksa login dan subscription…');
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (cancelled) return;
+      if (sessionError || !sessionData?.session) {
+        setAccessState('login');
+        setTenantState('error');
+        setBusiness({ name: 'Login diperlukan', description: 'Masuk melalui JFS AI Platform untuk membuka tenant.', hours: '—', location: '—' });
+        setDataNotice('Tenant nyata hanya tersedia setelah login melalui JFS AI Platform.');
+        return;
+      }
+      const { data: subscriptionRows, error: subscriptionError } = await supabase.rpc('jfs_get_my_app_subscription', { p_app_code: 'WHATSAPP-CS' });
+      if (cancelled) return;
+      const subscription = Array.isArray(subscriptionRows) ? subscriptionRows[0] : subscriptionRows;
+      const subscriptionStatus = subscription?.status;
+      if (subscriptionError || !['active', 'trial', 'expiring'].includes(subscriptionStatus)) {
+        setAccessState('blocked');
+        setTenantState('error');
+        setBusiness({ name: 'Subscription belum aktif', description: 'Aktifkan trial atau paket JFS AI WhatsApp CS untuk mengelola tenant.', hours: '—', location: '—' });
+        setDataNotice('Akses tenant dibatasi sampai subscription WhatsApp CS berstatus trial atau aktif.');
+        return;
+      }
+      setAccessState(subscriptionStatus);
       const { data: tenantRows, error: tenantError } = await supabase.rpc('jfs_public_customer_service_tenant', { p_tenant_code: tenantCode.trim() });
       const tenant = Array.isArray(tenantRows) ? tenantRows[0] : tenantRows;
       if (cancelled) return;
@@ -121,6 +153,29 @@ function App() {
   }
 
   const activeAutomationCount = automations.filter(a => a.active).length;
+
+  if (tenantCode.trim() && !['trial', 'active', 'expiring'].includes(accessState)) {
+    const gateTitle = accessState === 'checking' ? 'Memeriksa akses aplikasi…' : accessState === 'login' ? 'Login diperlukan' : 'Subscription diperlukan';
+    const gateMessage = accessState === 'checking'
+      ? 'Memeriksa sesi JFS AI dan status trial/subscription.'
+      : accessState === 'login'
+        ? 'Masuk melalui JFS AI Platform terlebih dahulu. Sesi login platform akan digunakan untuk memeriksa akses WhatsApp CS.'
+        : 'Tenant bisnis tidak dapat dibuka sebelum trial atau subscription JFS AI WhatsApp CS aktif.';
+    return (
+      <div className="app">
+        <header className="topbar"><div className="brand"><span className="brand-mark">✦</span><span><b>JFS AI</b><small>WHATSAPP BUSINESS AI</small></span></div></header>
+        <main className="shell"><section className="page">
+          <div className="panel"><span className="eyebrow">JFS AI SUBSCRIPTION</span><h2>{gateTitle}</h2><p>{gateMessage}</p>
+            <div className="notice" role="status">{dataNotice || 'Status akses sedang diperiksa.'}</div>
+            <div className="hero-actions" style={{ marginTop: 18 }}>
+              <button className="primary" onClick={() => { window.location.href = 'https://jfsaitechnology.github.io/jfs-ai-platform/'; }}>Login / Dashboard JFS AI →</button>
+              <button className="secondary" onClick={() => { window.location.href = 'https://jfsaitechnology.github.io/jfs-ai-platform/checkout.html?app=WHATSAPP-CS'; }}>Lihat Paket WhatsApp CS →</button>
+            </div>
+          </div>
+        </section></main>
+      </div>
+    );
+  }
 
   return (
     <div className="app">
