@@ -42,11 +42,11 @@ function App() {
       if (!supabase) { setTenantState('demo'); setDataNotice('Supabase belum dikonfigurasi. Data yang tampil adalah contoh demo.'); return; }
       if (!tenantCode.trim()) { setTenantState('demo'); setDataNotice('Mode demo. Tambahkan ?tenant=KODE_TENANT pada URL untuk memuat data bisnis aktif.'); return; }
       setTenantState('loading');
-      const { data: tenant, error: tenantError } = await supabase.from('tenants').select('id,tenant_code,business_name,business_type,description,address,city,province,phone,whatsapp,status,ai_enabled').eq('tenant_code', tenantCode.trim()).in('status', ['active','trial']).maybeSingle();
+      const { data: tenant, error: tenantError } = await supabase.from('tenants').select('id,tenant_code,business_name,business_type,address,city,province,phone,whatsapp,status,ai_enabled').eq('tenant_code', tenantCode.trim()).in('status', ['active','trial']).maybeSingle();
       if (cancelled) return;
       if (tenantError || !tenant) { setTenantState('error'); setDataNotice('Data tenant tidak ditemukan atau belum dapat diakses. Periksa kode tenant dan status bisnis.'); return; }
       setTenantId(tenant.id);
-      setBusiness({ name: tenant.business_name || 'Usaha', description: tenant.description || tenant.business_type || 'Informasi usaha', hours: 'Jam operasional belum tersedia di database.', location: [tenant.address, tenant.city, tenant.province].filter(Boolean).join(', ') || 'Alamat belum tersedia di database.' });
+      setBusiness({ name: tenant.business_name || 'Usaha', description: tenant.business_type || 'Informasi usaha', hours: 'Jam operasional belum tersedia di database.', location: [tenant.address, tenant.city, tenant.province].filter(Boolean).join(', ') || 'Alamat belum tersedia di database.' });
       const [{ data: dbProducts, error: productError }, { data: knowledge, error: knowledgeError }] = await Promise.all([
         supabase.from('products').select('id,name,price,description,category,brand').eq('tenant_id', tenant.id).eq('is_active', true).order('name'),
         supabase.from('jfs_knowledge').select('id,category,title,content').eq('tenant_id', tenant.id).eq('is_active', true).order('category')
