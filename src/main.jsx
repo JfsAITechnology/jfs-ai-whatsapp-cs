@@ -40,11 +40,29 @@ function App() {
     let cancelled = false;
     async function loadTenantData() {
       if (!supabase) { setTenantState('demo'); setDataNotice('Supabase belum dikonfigurasi. Data yang tampil adalah contoh demo.'); return; }
-      if (!tenantCode.trim()) { setTenantState('demo'); setDataNotice('Mode demo. Tambahkan ?tenant=KODE_TENANT pada URL untuk memuat data bisnis aktif.'); return; }
+      if (!tenantCode.trim()) {
+        setTenantState('demo');
+        setBusiness({ name: 'Usaha Saya', description: 'Usaha UMKM Anda', hours: 'Senin–Sabtu, 08.00–20.00', location: 'Alamat usaha Anda' });
+        setProducts(initialProducts);
+        setFaq(initialFaq);
+        setDataNotice('Mode demo. Tambahkan ?tenant=KODE_TENANT pada URL untuk memuat data bisnis aktif.');
+        return;
+      }
       setTenantState('loading');
+      setTenantId(null);
+      setProducts([]);
+      setFaq([]);
+      setDataNotice('Memuat data tenant…');
       const { data: tenant, error: tenantError } = await supabase.from('tenants').select('id,tenant_code,business_name,business_type,address,city,province,phone,whatsapp,status,ai_enabled').eq('tenant_code', tenantCode.trim()).in('status', ['active','trial']).maybeSingle();
       if (cancelled) return;
-      if (tenantError || !tenant) { setTenantState('error'); setDataNotice('Data tenant tidak ditemukan atau belum dapat diakses. Periksa kode tenant dan status bisnis.'); return; }
+      if (tenantError || !tenant) {
+        setProducts([]);
+        setFaq([]);
+        setBusiness({ name: 'Tenant tidak tersedia', description: 'Data bisnis tidak dapat diakses.', hours: 'Jam operasional tidak tersedia.', location: 'Alamat tidak tersedia.' });
+        setTenantState('error');
+        setDataNotice('Data tenant tidak ditemukan atau belum dapat diakses. Data demo tidak digunakan untuk menjawab pelanggan. Periksa kode tenant dan status bisnis.');
+        return;
+      }
       setTenantId(tenant.id);
       setBusiness({ name: tenant.business_name || 'Usaha', description: tenant.business_type || 'Informasi usaha', hours: 'Jam operasional belum tersedia di database.', location: [tenant.address, tenant.city, tenant.province].filter(Boolean).join(', ') || 'Alamat belum tersedia di database.' });
       const [{ data: dbProducts, error: productError }, { data: knowledge, error: knowledgeError }] = await Promise.all([
@@ -52,10 +70,13 @@ function App() {
         supabase.from('jfs_knowledge').select('id,category,title,content').eq('tenant_id', tenant.id).eq('is_active', true).order('category')
       ]);
       if (cancelled) return;
-      if (!productError) setProducts((dbProducts || []).map(p => ({ id: p.id, name: p.name, price: Number(p.price || 0), stock: null, description: p.description || p.category || p.brand || 'Deskripsi belum tersedia.' })));
-      if (!knowledgeError && knowledge?.length) setFaq(knowledge.map(k => ({ id: k.id, q: k.title, a: k.content })));
+      setProducts(!productError ? (dbProducts || []).map(p => ({ id: p.id, name: p.name, price: Number(p.price || 0), stock: null, description: p.description || p.category || p.brand || 'Deskripsi belum tersedia.' })) : []);
+      setFaq(!knowledgeError ? (knowledge || []).map(k => ({ id: k.id, q: k.title, a: k.content })) : []);
       setTenantState('connected');
-      setDataNotice(`Terhubung ke data tenant ${tenant.tenant_code}. Mode baca saja; perubahan data bisnis memerlukan login dan izin admin.`);
+      const dataWarnings = [productError && 'produk', knowledgeError && 'knowledge base'].filter(Boolean);
+      setDataNotice(dataWarnings.length
+        ? `Tenant ${tenant.tenant_code} ditemukan, tetapi data ${dataWarnings.join(' dan ')} gagal dimuat. Informasi demo tidak digunakan.`
+        : `Terhubung ke data tenant ${tenant.tenant_code}. Mode baca saja; perubahan data bisnis memerlukan login dan izin admin.`);
     }
     loadTenantData();
     return () => { cancelled = true; };
