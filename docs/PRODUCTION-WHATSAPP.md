@@ -27,11 +27,11 @@ Supabase-provided `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are used server
 
 ## WhatsApp Cloud API
 
-Configure the Meta webhook callback to the deployed `whatsapp-webhook-v2` function URL. Subscribe the WhatsApp Business Account to the `messages` field. Use the same verify token as `WHATSAPP_VERIFY_TOKEN`. The POST handler verifies `X-Hub-Signature-256` using `META_APP_SECRET` before parsing/processing the payload; unsigned or mismatched requests are rejected. Message IDs are recorded in `jfs_whatsapp_webhook_events` and `jfs_messages` to suppress duplicate delivery.
+Configure the Meta webhook callback to the deployed `whatsapp-webhook-v2` function URL. Subscribe the WhatsApp Business Account to the `messages` field. Use the same verify token as `WHATSAPP_VERIFY_TOKEN`. The POST handler verifies `X-Hub-Signature-256` using `META_APP_SECRET` before parsing/processing the payload; unsigned or mismatched requests are rejected. Message IDs are recorded in `jfs_whatsapp_webhook_events` and `jfs_messages` to suppress duplicate delivery. Before handling a phone-number connection, the webhook also checks that at least one tenant owner/admin has an unexpired WhatsApp CS trial or subscription.
 
 ## Channel connection
 
-For each tenant, `jfs_channel_connections` must contain `channel='whatsapp'`, the business phone number, `status='connected'`, `ai_enabled=true`, and `metadata.phone_number_id` from Meta. The dashboard now calls `whatsapp-channel-connect`; the server verifies the ID with the Meta Graph API before saving it.
+For each tenant, `jfs_channel_connections` must contain `channel='whatsapp'`, the business phone number, `status='connected'`, `ai_enabled=true`, and `metadata.phone_number_id` from Meta. The dashboard now calls `whatsapp-channel-connect`; the server verifies the ID with the Meta Graph API before saving it and requires the authenticated owner/admin to have a non-expired WhatsApp CS trial/subscription.
 
 ## Automation scheduler
 
