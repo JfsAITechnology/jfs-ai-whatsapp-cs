@@ -72,8 +72,8 @@ Deno.serve(async (request: Request) => {
       .eq("app_code", "WHATSAPP-CS")
       .maybeSingle();
     if (subscriptionError) throw subscriptionError;
-    const endValues = [subscription?.trial_end, subscription?.expires_at].filter(Boolean).map((value) => Date.parse(value));
-    const expiry = endValues.length ? Math.max(...endValues) : NaN;
+    const expiryValue = subscription?.expires_at || subscription?.trial_end;
+    const expiry = expiryValue ? Date.parse(expiryValue) : NaN;
     if (!subscription || !["trial", "active", "expiring"].includes(String(subscription.status || "").toLowerCase()) ||
         !Number.isFinite(expiry) || expiry <= Date.now()) {
       return reply({ error: "Subscription WhatsApp CS tidak aktif. Aktifkan trial atau paket berlangganan terlebih dahulu." }, 403);
