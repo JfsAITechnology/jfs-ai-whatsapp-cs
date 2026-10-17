@@ -30,6 +30,8 @@ function App() {
   const [messages, setMessages] = useState([{ role: 'ai', text: 'Halo 👋 Saya AI Customer Service. Tanyakan tentang produk, layanan, jam buka, lokasi, atau cara pemesanan.' }]);
   const [waConnected, setWaConnected] = useState(false);
   const [waNumber, setWaNumber] = useState('');
+  const [phoneNumberId, setPhoneNumberId] = useState('');
+  const [connectionBusy, setConnectionBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [tenantState, setTenantState] = useState('loading');
   const [accessState, setAccessState] = useState('checking');
@@ -146,15 +148,33 @@ function App() {
       setAccessState(subscriptionStatus);
       setTenantId(tenant.id);
       setBusiness({ name: tenant.business_name || 'Usaha', description: tenant.business_type || 'Informasi usaha', hours: 'Jam operasional belum tersedia di database.', location: [tenant.address, tenant.city, tenant.province].filter(Boolean).join(', ') || 'Alamat belum tersedia di database.' });
-      const [{ data: dbProducts, error: productError }, { data: knowledge, error: knowledgeError }] = await Promise.all([
+      const [
+        { data: dbProducts, error: productError },
+        { data: knowledge, error: knowledgeError },
+        { data: channelRows, error: channelError }
+      ] = await Promise.all([
         supabase.rpc('jfs_owner_customer_service_products', { p_tenant_code: tenant.tenant_code }),
-        supabase.rpc('jfs_owner_customer_service_knowledge', { p_tenant_code: tenant.tenant_code })
+        supabase.rpc('jfs_owner_customer_service_knowledge', { p_tenant_code: tenant.tenant_code }),
+        supabase.from('jfs_channel_connections')
+          .select('id,phone,status,ai_enabled,metadata')
+          .eq('tenant_id', tenant.id)
+          .eq('channel', 'whatsapp')
+          .limit(2)
       ]);
       if (cancelled) return;
       setProducts(!productError ? (dbProducts || []).map(p => ({ id: p.id, name: p.name, price: Number(p.price || 0), stock: null, description: p.description || p.category || p.brand || 'Deskripsi belum tersedia.' })) : []);
       setFaq(!knowledgeError ? (knowledge || []).map(k => ({ id: k.id, q: k.title, a: k.content })) : []);
+      if (!channelError && channelRows?.length === 1) {
+        const channel = channelRows[0];
+        setWaNumber(channel.phone || '');
+        setPhoneNumberId(channel.metadata?.phone_number_id || '');
+        setWaConnected(['connected', 'active'].includes(String(channel.status || '').toLowerCase()));
+      } else {
+        setWaConnected(false);
+        setPhoneNumberId('');
+      }
       setTenantState('connected');
-      const dataWarnings = [productError && 'produk', knowledgeError && 'knowledge base'].filter(Boolean);
+      const dataWarnings = [productError && 'produk', knowledgeError && 'knowledge base', channelError && 'koneksi WhatsApp'].filter(Boolean);
       setDataNotice(dataWarnings.length
         ? `Tenant ${tenant.tenant_code} ditemukan, tetapi data ${dataWarnings.join(' dan ')} gagal dimuat. Informasi demo tidak digunakan.`
         : `Terhubung ke data tenant ${tenant.tenant_code}. Mode baca saja; perubahan data bisnis memerlukan login dan izin admin.`);
@@ -191,13 +211,37 @@ function App() {
     setAutomations(items => [...items, { id: Date.now(), name: 'Automation Baru', trigger: 'Kondisi bisnis', action: 'Kirim WhatsApp', active: false }]);
   }
 
-  function connectWhatsApp() {
-    if (!waNumber.trim()) {
-      setNotice('Masukkan nomor WhatsApp Business terlebih dahulu.');
+  async function connectWhatsApp() {
+    if (!tenantCode.trim() || !tenantId || tenantState !== 'connected') {
+      setNotice('Tenant belum siap. Login dan pilih tenant usaha terlebih dahulu.');
       return;
     }
-    setWaConnected(true);
-    setNotice('Nomor tersimpan sebagai konfigurasi demo. Koneksi WhatsApp Cloud API membutuhkan kredensial backend pada tahap integrasi.');
+    if (!phoneNumberId.trim()) {
+      setNotice('Masukkan Phone Number ID dari Meta WhatsApp Manager.');
+      return;
+    }
+    if (!supabase || connectionBusy) return;
+    setConnectionBusy(true);
+    setNotice('');
+    try {
+      const { data, error } = await supabase.functions.invoke('whatsapp-channel-connect', {
+        body: {
+          tenant_code: tenantCode.trim(),
+          phone_number_id: phoneNumberId.trim(),
+          phone: waNumber.trim()
+        }
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      setWaConnected(data?.connection?.status === 'connected');
+      setWaNumber(data?.connection?.phone || waNumber);
+      setPhoneNumberId(data?.connection?.phone_number_id || phoneNumberId);
+      setNotice(data?.message || 'Phone Number ID berhasil diverifikasi oleh Meta.');
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Koneksi WhatsApp gagal. Periksa konfigurasi backend.');
+    } finally {
+      setConnectionBusy(false);
+    }
   }
 
   async function createTenant(event) {
@@ -357,7 +401,7 @@ function App() {
               <div><small>Produk</small><strong>{products.length}</strong></div>
               <div><small>FAQ</small><strong>{faq.length}</strong></div>
               <div><small>Automation aktif</small><strong>{activeAutomationCount}</strong></div>
-              <div><small>WhatsApp</small><strong>{waConnected ? 'ON' : 'OFF'}</strong></div>
+              <div><small>Channel API</small><strong>{waConnected ? 'Verified' : 'Setup'}</strong></div>
             </div>
             <div className="flow"><span>Customer</span><i>→</i><span>AI CS</span><i>→</i><span>Automation</span><i>→</i><span>WhatsApp</span></div>
           </div>
@@ -390,7 +434,17 @@ function App() {
 
         {tab === 'business' && <section className="page"><div className="page-head"><div><span className="eyebrow">DATA BISNIS</span><h2>Knowledge Base</h2><p>Data ini menjadi sumber jawaban AI.</p>{tenantState === 'connected' && <small>Tenant: {tenantCode} · baca saja</small>}</div><button className="secondary" onClick={() => setTab('home')}>← Dashboard</button></div><div className="grid2"><div className="panel"><div className="safe-note">{tenantState === 'connected' ? 'Data diambil dari Supabase dan ditampilkan dalam mode baca saja.' : 'Mode demo: perubahan di halaman ini hanya tersimpan sementara di browser.'}</div><div className="field"><label>Nama usaha</label><input value={business.name} onChange={e => setBusiness({ ...business, name: e.target.value })}/></div><div className="field"><label>Deskripsi</label><textarea value={business.description} onChange={e => setBusiness({ ...business, description: e.target.value })}/></div><div className="field"><label>Jam buka</label><input value={business.hours} onChange={e => setBusiness({ ...business, hours: e.target.value })}/></div><div className="field"><label>Lokasi</label><input value={business.location} onChange={e => setBusiness({ ...business, location: e.target.value })}/></div></div><div className="panel"><div className="panel-title"><b>Produk</b>{tenantState !== 'connected' && <button className="secondary" onClick={() => setProducts([...products, { id: Date.now(), name: 'Produk Baru', price: 100000, stock: 5, description: 'Deskripsi produk baru.' }])}>+ Produk demo</button>}</div>{products.map(p => <div className="product-row" key={p.id}><div><b>{p.name}</b><small>{p.description}</small></div><span>Rp{p.price.toLocaleString('id-ID')}{p.stock == null ? ' • stok tidak ditampilkan' : ` • stok ${p.stock}`}</span></div>)}<div className="panel-title faq-title"><b>FAQ / Knowledge</b>{tenantState !== 'connected' && <button className="secondary" onClick={() => setFaq([...faq, { id: Date.now(), q: 'Pertanyaan baru?', a: 'Jawaban baru.' }])}>+ FAQ demo</button>}</div>{faq.map(f => <div className="faq-row" key={f.id}><b>{f.q}</b><span>{f.a}</span></div>)}</div></div></section>}
 
-        {tab === 'whatsapp' && <section className="page"><div className="page-head"><div><span className="eyebrow">CHANNEL</span><h2>WhatsApp Business</h2><p>Konfigurasi channel untuk tahap integrasi backend.</p></div><button className="secondary" onClick={() => setTab('home')}>← Dashboard</button></div><div className="panel connection"><div className="connection-status"><span className={waConnected ? 'status-good' : 'status-off'}>{waConnected ? '● Terhubung (demo)' : '○ Belum terhubung'}</span></div><div className="field"><label>Nomor WhatsApp Business</label><input value={waNumber} onChange={e => setWaNumber(e.target.value)} placeholder="628xxxxxxxxxx"/></div><button className="primary" onClick={connectWhatsApp}>{waConnected ? 'Perbarui konfigurasi demo' : 'Simpan konfigurasi demo'}</button>{notice && <div className="notice">{notice}</div>}<div className="integration-note"><b>Siap diintegrasikan ke JFS AI Platform</b><span>Frontend ini tidak menyimpan token rahasia. Webhook, WhatsApp Cloud API, AI provider, database, dan RLS harus dijalankan di backend/Edge Functions saat tahap produksi.</span></div></div></section>}
+        {tab === 'whatsapp' && <section className="page">
+          <div className="page-head"><div><span className="eyebrow">CHANNEL</span><h2>WhatsApp Business</h2><p>Verifikasi nomor WhatsApp Business sebelum mengaktifkan channel.</p></div><button className="secondary" onClick={() => setTab('home')}>← Dashboard</button></div>
+          <div className="panel connection">
+            <div className="connection-status"><span className={waConnected ? 'status-good' : 'status-off'}>{waConnected ? '● Phone Number ID terverifikasi' : '○ Nomor belum diverifikasi ke Meta'}</span></div>
+            <div className="field"><label htmlFor="whatsapp_number">Nomor WhatsApp Business (sesuai Meta)</label><input id="whatsapp_number" inputMode="tel" value={waNumber} onChange={e => setWaNumber(e.target.value)} placeholder="Contoh: 628xxxxxxxxxx"/></div>
+            <div className="field"><label htmlFor="whatsapp_phone_number_id">Phone Number ID dari Meta</label><input id="whatsapp_phone_number_id" inputMode="numeric" value={phoneNumberId} onChange={e => setPhoneNumberId(e.target.value)} placeholder="ID angka dari WhatsApp Manager"/></div>
+            <button className="primary" onClick={connectWhatsApp} disabled={connectionBusy || tenantState !== 'connected'}>{connectionBusy ? 'Memverifikasi ke Meta…' : waConnected ? 'Verifikasi ulang koneksi →' : 'Verifikasi & sambungkan WhatsApp →'}</button>
+            {notice && <div className="notice" role="status">{notice}</div>}
+            <div className="integration-note"><b>Token rahasia tetap di server</b><span>Backend akan memvalidasi Phone Number ID dengan Meta lalu menyimpan koneksi ke tenant ini. Pesan masuk nyata tetap membutuhkan callback webhook Meta, event messages, META_APP_SECRET, dan WHATSAPP_VERIFY_TOKEN yang benar.</span></div>
+          </div>
+        </section>}
       </main>
 
       <nav className="bottom-nav">
