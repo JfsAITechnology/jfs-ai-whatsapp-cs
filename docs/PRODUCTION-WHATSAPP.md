@@ -40,7 +40,18 @@ Before the scheduler can run, create the same random secret named `WHATSAPP_WORK
 1. Supabase Dashboard → Edge Functions → Secrets.
 2. GitHub repository → Settings → Secrets and variables → Actions → New repository secret.
 
-Do not paste the token into source code, issues, or chat. After saving both secrets, run the scheduler workflow manually once and verify it succeeds. It also requires `WHATSAPP_ACCESS_TOKEN` in Supabase Edge Function secrets. The worker processes up to 50 due jobs per invocation; jobs missing a recipient, message body or `phone_number_id` are now marked failed with a reason instead of remaining pending forever.
+Generate a token locally in Windows PowerShell (do not share it):
+
+```powershell
+$bytes = New-Object byte[] 32
+$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$rng.GetBytes($bytes)
+$token = [Convert]::ToBase64String($bytes)
+$rng.Dispose()
+$token
+```
+
+Create a Supabase Edge Function secret named `WHATSAPP_WORKER_CRON_TOKEN` with that value, then create a GitHub Actions repository secret with the exact same name and value. Do not paste the token into source code, issues, or chat. After saving both secrets, run the scheduler workflow manually once and verify it succeeds. It also requires `WHATSAPP_ACCESS_TOKEN` in Supabase Edge Function secrets. The worker processes up to 50 due jobs per invocation; jobs missing a recipient, message body or `phone_number_id` are now marked failed with a reason instead of remaining pending forever.
 
 ## Orders
 
@@ -48,4 +59,4 @@ WhatsApp order messages create `jfs_orders` and `jfs_order_items` in the same JF
 
 ## Current limitation
 
-The webhook handler has been hardened and deployed, but this is not yet proof of production readiness. Set `META_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_ACCESS_TOKEN`, and `OPENAI_API_KEY` in Supabase Edge Function secrets; confirm the matching Meta callback and active tenant channel; and run a real inbound/outbound test. The automation worker still needs a reliable scheduled invocation with authenticated server-side credentials. Do not publish the service-role key or Meta credentials in the frontend.
+The webhook and three supporting Edge Functions are deployed, and a protected five-minute GitHub Actions scheduler is committed. Production is still unverified until `META_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_ACCESS_TOKEN`, `OPENAI_API_KEY`, and the shared `WHATSAPP_WORKER_CRON_TOKEN` are configured; the Meta callback is subscribed to `messages`; a tenant channel is verified in the dashboard; and real inbound/outbound plus scheduled-job tests succeed. Do not publish the service-role key or Meta credentials in the frontend.
