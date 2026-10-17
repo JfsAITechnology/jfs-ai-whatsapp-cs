@@ -7,6 +7,7 @@ Architecture:
 ## Edge Functions
 
 - `whatsapp-webhook-v2`: Meta webhook verification, inbound message persistence, customer/conversation creation, product/stock context, AI response, WhatsApp reply, and order creation.
+- `whatsapp-channel-connect`: JWT-protected endpoint; checks tenant owner/admin, asks Meta to validate the configured `phone_number_id`, and stores a verified connection. It does not substitute for configuring the Meta webhook callback.
 - `whatsapp-automation-worker`: processes due `jfs_automation_jobs` and sends WhatsApp messages.
 
 ## Required secrets
@@ -28,7 +29,7 @@ Configure the Meta webhook callback to the deployed `whatsapp-webhook-v2` functi
 
 ## Channel connection
 
-For each tenant, `jfs_channel_connections` must contain `channel='whatsapp'`, the business phone number, `ai_enabled=true`, and `metadata.phone_number_id` from Meta.
+For each tenant, `jfs_channel_connections` must contain `channel='whatsapp'`, the business phone number, `status='connected'`, `ai_enabled=true`, and `metadata.phone_number_id` from Meta. The dashboard now calls `whatsapp-channel-connect`; the server verifies the ID with the Meta Graph API before saving it.
 
 ## Automation scheduler
 
