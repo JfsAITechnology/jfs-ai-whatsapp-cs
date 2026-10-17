@@ -73,10 +73,11 @@ Deno.serve(async (request: Request) => {
     }).select("id,tenant_code,business_name,business_type,address,city,province,status,ai_enabled").single();
     if (tenantError) throw tenantError;
 
+    const membershipEmail = authData.user.email || (String(authData.user.id) + "@no-email.invalid");
     const { error: ownerError } = await admin.from("tenant_users").insert({
       tenant_id: tenant.id,
       user_id: authData.user.id,
-      email: authData.user.email || null,
+      email: membershipEmail,
       full_name: fullName || null,
       role: "owner",
       is_active: true,
