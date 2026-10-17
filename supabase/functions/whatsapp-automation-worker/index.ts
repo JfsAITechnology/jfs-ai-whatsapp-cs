@@ -21,7 +21,7 @@ async function send(phoneId: string, to: string, text: string) {
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
   if (!cronToken) return json({ error: "WHATSAPP_WORKER_CRON_TOKEN is not configured" }, 503);
-  const supplied = (req.headers.get("authorization") || "").replace(/^Bearer\\s+/i, "").trim();
+  const supplied = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
   if (!safeEqual(supplied, cronToken)) return json({ error: "Unauthorized worker invocation" }, 401);
   if (!token) return json({ error: "WHATSAPP_ACCESS_TOKEN is not configured" }, 503);
   try {
