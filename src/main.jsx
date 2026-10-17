@@ -351,8 +351,9 @@ function App() {
 
   const activeAutomationCount = automations.filter(a => a.active).length;
 
-  if (!tenantCode.trim() || !['trial', 'active', 'expiring'].includes(accessState)) {
+  if (!tenantCode.trim() || tenantState !== 'connected' || !['trial', 'active', 'expiring'].includes(accessState)) {
     const gateTitle = accessState === 'checking' ? 'Memeriksa akses aplikasi…'
+      : tenantState === 'loading' && ['trial', 'active', 'expiring'].includes(accessState) ? 'Memuat data tenant…'
       : accessState === 'login' ? 'Login diperlukan'
       : accessState === 'tenant-denied' ? 'Tenant belum aktif'
       : accessState === 'tenant-select' ? 'Pilih tenant usaha'
@@ -360,6 +361,8 @@ function App() {
       : 'Subscription diperlukan';
     const gateMessage = accessState === 'checking'
       ? 'Memeriksa sesi JFS AI, akses tenant, dan status trial/subscription.'
+      : tenantState === 'loading' && ['trial', 'active', 'expiring'].includes(accessState)
+        ? 'Subscription terverifikasi. Memuat produk, knowledge base, koneksi WhatsApp, dan automation tenant…'
       : accessState === 'login'
         ? 'Masuk melalui JFS AI Platform terlebih dahulu. Dashboard tenant tidak dibuka dalam mode demo publik.'
         : accessState === 'tenant-denied'
