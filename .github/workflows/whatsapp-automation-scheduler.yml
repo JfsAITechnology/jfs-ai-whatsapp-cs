@@ -1,0 +1,42 @@
+name: Run JFS WhatsApp automation worker
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-automation-worker
+  cancel-in-progress: false
+
+jobs:
+  run-due-jobs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Invoke protected Supabase worker
+        env:
+          WORKER_TOKEN: ${{ secrets.WHATSAPP_WORKER_CRON_TOKEN }}
+        run: |
+          if [ -z "$WORKER_TOKEN" ]; then
+            echo "::error::Set WHATSAPP_WORKER_CRON_TOKEN in GitHub Actions secrets and in Supabase Edge Function secrets."
+            exit 1
+          fi
+
+          code="$(curl --silent --show-error \
+            --output /tmp/whatsapp-worker-response.json \
+            --write-out '%{http_code}' \
+            --request POST \
+            --header "Authorization: Bearer $WORKER_TOKEN" \
+            --header "Content-Type: application/json" \
+            --data '{}' \
+            "https://evtkeyfjgqwarsmlzrkh.supabase.co/functions/v1/whatsapp-automation-worker")"
+
+          cat /tmp/whatsapp-worker-response.json
+          if [ "$code" != "200" ]; then
+            echo "::error::WhatsApp worker returned HTTP $code."
+            exit 1
+          fi
