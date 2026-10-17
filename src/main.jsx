@@ -36,18 +36,65 @@ function App() {
   const [tenantCode, setTenantCode] = useState(new URLSearchParams(window.location.search).get('tenant') || new URLSearchParams(window.location.search).get('id') || '');
   const [tenantId, setTenantId] = useState(null);
   const [dataNotice, setDataNotice] = useState('');
+  const [tenantChoices, setTenantChoices] = useState([]);
+  const [onboarding, setOnboarding] = useState({ business_name: '', business_type: 'Usaha lainnya', full_name: '', whatsapp: '' });
+  const [onboardingBusy, setOnboardingBusy] = useState(false);
+  const [onboardingError, setOnboardingError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
     async function loadTenantData() {
       if (!tenantCode.trim()) {
-        setAccessState('demo');
-        if (!supabase) { setTenantState('demo'); setDataNotice('Supabase belum dikonfigurasi. Data yang tampil adalah contoh demo.'); return; }
-        setTenantState('demo');
-        setBusiness({ name: 'Usaha Saya', description: 'Usaha UMKM Anda', hours: 'Senin–Sabtu, 08.00–20.00', location: 'Alamat usaha Anda' });
-        setProducts(initialProducts);
-        setFaq(initialFaq);
-        setDataNotice('Mode demo. Tambahkan ?tenant=KODE_TENANT pada URL untuk memuat data bisnis aktif.');
+        if (!supabase) {
+          setAccessState('error');
+          setTenantState('error');
+          setDataNotice('Backend belum dikonfigurasi. Data tenant nyata tidak dapat dibuka.');
+          return;
+        }
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        if (cancelled) return;
+        if (sessionError || !sessionData?.session) {
+          setAccessState('login');
+          setTenantState('error');
+          setDataNotice('Login melalui JFS AI Platform untuk memilih atau menyiapkan tenant usaha.');
+          return;
+        }
+        const { data: memberships, error: membershipError } = await supabase
+          .from('tenant_users')
+          .select('tenant_id,role,tenants(id,tenant_code,business_name,status,ai_enabled)')
+          .eq('user_id', sessionData.session.user.id)
+          .eq('is_active', true);
+        if (cancelled) return;
+        if (membershipError) {
+          setAccessState('error');
+          setTenantState('error');
+          setDataNotice('Gagal memuat daftar tenant milik akun ini: ' + membershipError.message);
+          return;
+        }
+        const choices = (memberships || [])
+          .map((row) => Array.isArray(row.tenants) ? row.tenants[0] : row.tenants)
+          .filter((tenant) => tenant?.tenant_code && ['active', 'trial'].includes(String(tenant.status || '').toLowerCase()));
+        const uniqueChoices = Array.from(new Map(choices.map((tenant) => [tenant.id, tenant])).values());
+        setTenantChoices(uniqueChoices);
+        if (uniqueChoices.length === 1) {
+          setTenantCode(uniqueChoices[0].tenant_code);
+          return;
+        }
+        if (uniqueChoices.length > 1) {
+          setAccessState('tenant-select');
+          setTenantState('choose-tenant');
+          setDataNotice('Pilih tenant yang ingin Anda kelola. Data tenant lain tidak akan ditampilkan.');
+          return;
+        }
+        if ((memberships || []).length > 0) {
+          setAccessState('tenant-denied');
+          setTenantState('error');
+          setDataNotice('Akun memiliki keanggotaan tenant, tetapi tenant tersebut belum aktif. Hubungi admin platform.');
+          return;
+        }
+        setAccessState('onboarding');
+        setTenantState('setup');
+        setDataNotice('Login berhasil. Lengkapi data usaha untuk membuat tenant WhatsApp CS Anda.');
         return;
       }
       if (!supabase) {
@@ -153,27 +200,129 @@ function App() {
     setNotice('Nomor tersimpan sebagai konfigurasi demo. Koneksi WhatsApp Cloud API membutuhkan kredensial backend pada tahap integrasi.');
   }
 
+  async function createTenant(event) {
+    event.preventDefault();
+    if (onboardingBusy || !supabase) return;
+    setOnboardingBusy(true);
+    setOnboardingError('');
+    try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !sessionData?.session) throw new Error('Sesi login tidak ditemukan. Silakan login ulang melalui JFS AI Platform.');
+      const { data, error } = await supabase.functions.invoke('customer-service-bootstrap', {
+        body: {
+          business_name: onboarding.business_name.trim(),
+          business_type: onboarding.business_type.trim() || 'Usaha lainnya',
+          full_name: onboarding.full_name.trim(),
+          whatsapp: onboarding.whatsapp.trim()
+        }
+      });
+      if (error) throw error;
+      const tenant = data?.tenant;
+      if (!tenant?.tenant_code) throw new Error(data?.error || 'Tenant tidak berhasil dibuat. Silakan coba lagi atau hubungi admin.');
+      window.history.replaceState({}, '', '?tenant=' + encodeURIComponent(tenant.tenant_code));
+      setDataNotice('Tenant usaha berhasil disiapkan. Sistem akan memeriksa akses WhatsApp CS dan trial.');
+      setAccessState('checking');
+      setTenantCode(tenant.tenant_code);
+    } catch (error) {
+      setOnboardingError(error instanceof Error ? error.message : 'Gagal menyiapkan tenant usaha.');
+    } finally {
+      setOnboardingBusy(false);
+    }
+  }
+
   const activeAutomationCount = automations.filter(a => a.active).length;
 
-  if (tenantCode.trim() && !['trial', 'active', 'expiring'].includes(accessState)) {
-    const gateTitle = accessState === 'checking' ? 'Memeriksa akses aplikasi…' : accessState === 'login' ? 'Login diperlukan' : accessState === 'tenant-denied' ? 'Akses tenant ditolak' : 'Subscription diperlukan';
+  if (!tenantCode.trim() || !['trial', 'active', 'expiring'].includes(accessState)) {
+    const gateTitle = accessState === 'checking' ? 'Memeriksa akses aplikasi…'
+      : accessState === 'login' ? 'Login diperlukan'
+      : accessState === 'tenant-denied' ? 'Tenant belum aktif'
+      : accessState === 'tenant-select' ? 'Pilih tenant usaha'
+      : accessState === 'onboarding' ? 'Siapkan WhatsApp CS untuk usaha Anda'
+      : 'Subscription diperlukan';
     const gateMessage = accessState === 'checking'
       ? 'Memeriksa sesi JFS AI, akses tenant, dan status trial/subscription.'
       : accessState === 'login'
-        ? 'Masuk melalui JFS AI Platform terlebih dahulu. Sesi login platform akan digunakan untuk memeriksa akses WhatsApp CS.'
+        ? 'Masuk melalui JFS AI Platform terlebih dahulu. Dashboard tenant tidak dibuka dalam mode demo publik.'
         : accessState === 'tenant-denied'
-          ? 'Akun ini bukan pengelola tenant yang diminta. Trial tidak dimulai dan data tenant tidak ditampilkan.'
-          : 'Tenant bisnis tidak dapat dibuka sebelum trial atau subscription JFS AI WhatsApp CS aktif.';
+          ? 'Keanggotaan tenant ditemukan, tetapi tenant belum aktif. Hubungi admin platform.'
+          : accessState === 'tenant-select'
+            ? 'Pilih usaha yang Anda miliki atau kelola.'
+            : accessState === 'onboarding'
+              ? 'Isi data dasar usaha. Tenant akan dibuat menggunakan sesi login JFS AI yang sedang aktif.'
+              : 'Tenant bisnis tidak dapat dibuka sebelum trial atau subscription WhatsApp CS aktif.';
+
     return (
       <div className="app">
         <header className="topbar"><div className="brand"><span className="brand-mark">✦</span><span><b>JFS AI</b><small>WHATSAPP BUSINESS AI</small></span></div></header>
         <main className="shell"><section className="page">
-          <div className="panel"><span className="eyebrow">JFS AI SUBSCRIPTION</span><h2>{gateTitle}</h2><p>{gateMessage}</p>
-            <div className="notice" role="status">{dataNotice || 'Status akses sedang diperiksa.'}</div>
-            <div className="hero-actions" style={{ marginTop: 18 }}>
-              <button className="primary" onClick={() => { window.location.href = 'https://jfsaitechnology.github.io/jfs-ai-platform/'; }}>Login / Dashboard JFS AI →</button>
-              <button className="secondary" onClick={() => { window.location.href = 'https://jfsaitechnology.github.io/jfs-ai-platform/checkout.html?app=WHATSAPP-CS'; }}>Lihat Paket WhatsApp CS →</button>
-            </div>
+          <div className="panel">
+            {accessState === 'tenant-select' ? (
+              <>
+                <span className="eyebrow">PILIH TENANT</span>
+                <h2>{gateTitle}</h2>
+                <p>{gateMessage}</p>
+                <div className="automation-list" style={{ marginTop: 18 }}>
+                  {tenantChoices.map((tenant) => (
+                    <button key={tenant.id} className="secondary tenant-choice" style={{ width: '100%', textAlign: 'left', padding: 14, display: 'flex', flexDirection: 'column', gap: 4 }}
+                      onClick={() => {
+                        window.history.replaceState({}, '', '?tenant=' + encodeURIComponent(tenant.tenant_code));
+                        setAccessState('checking');
+                        setTenantCode(tenant.tenant_code);
+                      }}>
+                      <b>{tenant.business_name || 'Usaha tanpa nama'}</b>
+                      <small>{tenant.tenant_code} · {tenant.status}</small>
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : accessState === 'onboarding' ? (
+              <>
+                <span className="eyebrow">ONBOARDING JFS AI</span>
+                <h2>{gateTitle}</h2>
+                <p>{gateMessage}</p>
+                <form className="setup-form" onSubmit={createTenant} style={{ marginTop: 18 }}>
+                  <div className="field">
+                    <label htmlFor="business_name">Nama usaha *</label>
+                    <input id="business_name" required maxLength={120} value={onboarding.business_name}
+                      onChange={(event) => setOnboarding({ ...onboarding, business_name: event.target.value })}
+                      placeholder="Contoh: Laundry Berkah" />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="business_type">Jenis usaha</label>
+                    <input id="business_type" maxLength={80} value={onboarding.business_type}
+                      onChange={(event) => setOnboarding({ ...onboarding, business_type: event.target.value })}
+                      placeholder="Contoh: Laundry, retail, jasa" />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="full_name">Nama pengelola</label>
+                    <input id="full_name" maxLength={120} value={onboarding.full_name}
+                      onChange={(event) => setOnboarding({ ...onboarding, full_name: event.target.value })}
+                      placeholder="Nama Anda" />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="business_whatsapp">Nomor WhatsApp bisnis</label>
+                    <input id="business_whatsapp" inputMode="tel" maxLength={30} value={onboarding.whatsapp}
+                      onChange={(event) => setOnboarding({ ...onboarding, whatsapp: event.target.value })}
+                      placeholder="628xxxxxxxxxx" />
+                  </div>
+                  {onboardingError && <div className="notice" role="alert">{onboardingError}</div>}
+                  <button className="primary" type="submit" disabled={onboardingBusy}>
+                    {onboardingBusy ? 'Menyiapkan tenant…' : 'Buat tenant & lanjutkan →'}
+                  </button>
+                </form>
+              </>
+            ) : (
+              <>
+                <span className="eyebrow">JFS AI SUBSCRIPTION</span>
+                <h2>{gateTitle}</h2>
+                <p>{gateMessage}</p>
+                <div className="notice" role="status">{dataNotice || 'Status akses sedang diperiksa.'}</div>
+                <div className="hero-actions" style={{ marginTop: 18 }}>
+                  <button className="primary" onClick={() => { window.location.href = 'https://jfsaitechnology.github.io/jfs-ai-platform/'; }}>Login / Dashboard JFS AI →</button>
+                  <button className="secondary" onClick={() => { window.location.href = 'https://jfsaitechnology.github.io/jfs-ai-platform/checkout.html?app=WHATSAPP-CS'; }}>Lihat Paket WhatsApp CS →</button>
+                </div>
+              </>
+            )}
           </div>
         </section></main>
       </div>
