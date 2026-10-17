@@ -80,6 +80,16 @@ Deno.serve(async (request: Request) => {
       }, 400);
     }
 
+    const { data: channelOwner, error: channelOwnerError } = await db.from("jfs_channel_connections")
+      .select("tenant_id")
+      .eq("channel", "whatsapp")
+      .filter("metadata->>phone_number_id", "eq", phoneNumberId)
+      .maybeSingle();
+    if (channelOwnerError) throw channelOwnerError;
+    if (channelOwner && channelOwner.tenant_id !== tenant.id) {
+      return json({ error: "Nomor WhatsApp tersebut sudah terhubung ke tenant lain. Hubungi admin jika ini kekeliruan." }, 409);
+    }
+
     const { data: existingRows, error: existingError } = await db.from("jfs_channel_connections")
       .select("id,metadata")
       .eq("tenant_id", tenant.id)
