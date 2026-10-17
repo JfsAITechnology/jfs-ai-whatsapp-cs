@@ -13,7 +13,8 @@ Architecture:
 
 Set these in Supabase Edge Function secrets before production:
 
-- `WHATSAPP_VERIFY_TOKEN`
+- `WHATSAPP_VERIFY_TOKEN` (Meta GET verification handshake)
+- `META_APP_SECRET` (required to verify `X-Hub-Signature-256` on every POST; webhook fails closed with HTTP 503 until configured)
 - `WHATSAPP_ACCESS_TOKEN`
 - `WHATSAPP_GRAPH_VERSION` (for example `v23.0`)
 - `OPENAI_API_KEY`
@@ -23,7 +24,7 @@ Supabase-provided `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are used server
 
 ## WhatsApp Cloud API
 
-Configure the Meta webhook callback to the deployed `whatsapp-webhook-v2` function URL. Subscribe the WhatsApp Business Account to the `messages` field. Use the same verify token as the Edge Function secret.
+Configure the Meta webhook callback to the deployed `whatsapp-webhook-v2` function URL. Subscribe the WhatsApp Business Account to the `messages` field. Use the same verify token as `WHATSAPP_VERIFY_TOKEN`. The POST handler verifies `X-Hub-Signature-256` using `META_APP_SECRET` before parsing/processing the payload; unsigned or mismatched requests are rejected. Message IDs are recorded in `jfs_whatsapp_webhook_events` and `jfs_messages` to suppress duplicate delivery.
 
 ## Channel connection
 
@@ -39,4 +40,4 @@ WhatsApp order messages create `jfs_orders` and `jfs_order_items` in the same JF
 
 ## Current limitation
 
-The code and database foundation are deployed, but production Meta/OpenAI secrets and Meta webhook configuration are account-level credentials that cannot be safely fabricated. They must be entered in the Supabase/Meta dashboards before real WhatsApp traffic can flow.
+The webhook handler has been hardened and deployed, but this is not yet proof of production readiness. Set `META_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_ACCESS_TOKEN`, and `OPENAI_API_KEY` in Supabase Edge Function secrets; confirm the matching Meta callback and active tenant channel; and run a real inbound/outbound test. The automation worker still needs a reliable scheduled invocation with authenticated server-side credentials. Do not publish the service-role key or Meta credentials in the frontend.
