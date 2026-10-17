@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { supabase, supabaseConfigured } from './lib/supabase';
 import './styles.css';
@@ -25,8 +25,10 @@ function App() {
   const [business, setBusiness] = useState({ name: 'Usaha Saya', description: 'Usaha UMKM Anda', hours: 'Senin–Sabtu, 08.00–20.00', location: 'Alamat usaha Anda' });
   const [products, setProducts] = useState(initialProducts);
   const [faq, setFaq] = useState(initialFaq);
-  const [automations, setAutomations] = useState(initialAutomations);
+  const [automations, setAutomations] = useState([]);
   const [question, setQuestion] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
+  const [automationNotice, setAutomationNotice] = useState('');
   const [messages, setMessages] = useState([{ role: 'ai', text: 'Halo 👋 Saya AI Customer Service. Tanyakan tentang produk, layanan, jam buka, lokasi, atau cara pemesanan.' }]);
   const [waConnected, setWaConnected] = useState(false);
   const [waNumber, setWaNumber] = useState('');
@@ -151,7 +153,8 @@ function App() {
       const [
         { data: dbProducts, error: productError },
         { data: knowledge, error: knowledgeError },
-        { data: channelRows, error: channelError }
+        { data: channelRows, error: channelError },
+        { data: automationRows, error: automationError }
       ] = await Promise.all([
         supabase.rpc('jfs_owner_customer_service_products', { p_tenant_code: tenant.tenant_code }),
         supabase.rpc('jfs_owner_customer_service_knowledge', { p_tenant_code: tenant.tenant_code }),
@@ -159,11 +162,25 @@ function App() {
           .select('id,phone,status,ai_enabled,metadata')
           .eq('tenant_id', tenant.id)
           .eq('channel', 'whatsapp')
-          .limit(2)
+          .limit(2),
+        supabase.from('jfs_automations')
+          .select('id,name,trigger_type,action_type,config,is_active')
+          .eq('tenant_id', tenant.id)
+          .order('created_at', { ascending: true })
       ]);
       if (cancelled) return;
       setProducts(!productError ? (dbProducts || []).map(p => ({ id: p.id, name: p.name, price: Number(p.price || 0), stock: null, description: p.description || p.category || p.brand || 'Deskripsi belum tersedia.' })) : []);
       setFaq(!knowledgeError ? (knowledge || []).map(k => ({ id: k.id, q: k.title, a: k.content })) : []);
+      setAutomations(!automationError ? (automationRows || []).map(a => ({
+        id: a.id,
+        name: a.name,
+        trigger: ({ order_created: 'Pesanan dibuat', 'Order dibuat': 'Pesanan dibuat', 'order.created': 'Pesanan dibuat' })[a.trigger_type] || a.trigger_type,
+        action: a.action_type === 'send_whatsapp' ? 'Kirim pesan WhatsApp' : a.action_type,
+        active: a.is_active === true,
+        triggerType: a.trigger_type,
+        actionType: a.action_type,
+        config: a.config || {}
+      })) : []);
       if (!channelError && channelRows?.length === 1) {
         const channel = channelRows[0];
         setWaNumber(channel.phone || '');
@@ -174,7 +191,7 @@ function App() {
         setPhoneNumberId('');
       }
       setTenantState('connected');
-      const dataWarnings = [productError && 'produk', knowledgeError && 'knowledge base', channelError && 'koneksi WhatsApp'].filter(Boolean);
+      const dataWarnings = [productError && 'produk', knowledgeError && 'knowledge base', channelError && 'koneksi WhatsApp', automationError && 'automation'].filter(Boolean);
       setDataNotice(dataWarnings.length
         ? `Tenant ${tenant.tenant_code} ditemukan, tetapi data ${dataWarnings.join(' dan ')} gagal dimuat. Informasi demo tidak digunakan.`
         : `Terhubung ke data tenant ${tenant.tenant_code}. Mode baca saja; perubahan data bisnis memerlukan login dan izin admin.`);
@@ -183,32 +200,90 @@ function App() {
     return () => { cancelled = true; };
   }, [tenantCode]);
 
-  const answer = useMemo(() => {
-    const q = question.trim().toLowerCase();
-    if (!q) return '';
-    const product = products.find(p => q.includes(p.name.toLowerCase()));
-    if (product) return `${product.name}: Rp${product.price.toLocaleString('id-ID')}.${product.stock == null ? '' : ` Stok: ${product.stock} unit.`} ${product.description}`;
-    if (q.includes('harga') || q.includes('produk')) return `Saat ini tersedia ${products.length} produk. Silakan tanyakan nama produk yang ingin diketahui.`;
-    if (q.includes('jam') || q.includes('buka')) return business.hours;
-    if (q.includes('lokasi') || q.includes('alamat')) return business.location;
-    const f = faq.find(x => q.includes(x.q.replace('?', '').toLowerCase()));
-    if (f) return f.a;
-    if (q.includes('pesan') || q.includes('order') || q.includes('beli')) return 'Baik. Sebutkan nama produk dan jumlah yang ingin dipesan. Sistem dapat dikembangkan untuk meneruskan order ke JFS AI Platform.';
-    return 'Maaf, saya belum memiliki informasi tersebut. Silakan hubungi admin untuk mendapatkan bantuan lebih lanjut.';
-  }, [question, products, faq, business]);
-
-  function send() {
-    if (!question.trim()) return;
-    setMessages(m => [...m, { role: 'user', text: question }, { role: 'ai', text: answer }]);
+  async function send() {
+    const prompt = question.trim();
+    if (!prompt || aiBusy) return;
+    if (!supabase || !tenantCode.trim() || !tenantId || tenantState !== 'connected') {
+      setMessages(m => [...m, { role: 'user', text: prompt }, { role: 'ai', text: 'Tenant belum siap. Login dan periksa akses subscription terlebih dahulu.' }]);
+      setQuestion('');
+      return;
+    }
+    setAiBusy(true);
     setQuestion('');
+    setMessages(m => [...m, { role: 'user', text: prompt }, { role: 'ai', text: 'AI sedang memproses pertanyaan melalui backend…', pending: true }]);
+    try {
+      const { data, error } = await supabase.functions.invoke('whatsapp-ai-preview', {
+        body: { tenant_code: tenantCode.trim(), message: prompt }
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      const responseText = String(data?.answer || '').trim();
+      if (!responseText) throw new Error('AI tidak mengembalikan jawaban.');
+      setMessages(m => {
+        const next = [...m];
+        const index = next.findLastIndex(x => x.pending);
+        if (index >= 0) next[index] = { role: 'ai', text: responseText };
+        return next;
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Tes AI gagal. Periksa konfigurasi server.';
+      setMessages(m => {
+        const next = [...m];
+        const index = next.findLastIndex(x => x.pending);
+        if (index >= 0) next[index] = { role: 'ai', text: message };
+        return next;
+      });
+    } finally {
+      setAiBusy(false);
+    }
   }
 
-  function toggleAutomation(id) {
-    setAutomations(items => items.map(a => a.id === id ? { ...a, active: !a.active } : a));
+  async function toggleAutomation(id) {
+    const item = automations.find(a => a.id === id);
+    if (!item || !supabase || !tenantId || tenantState !== 'connected') {
+      setAutomationNotice('Tenant belum siap untuk menyimpan automation.');
+      return;
+    }
+    setAutomationNotice('');
+    const { data, error } = await supabase.from('jfs_automations')
+      .update({ is_active: !item.active, updated_at: new Date().toISOString() })
+      .eq('id', id).eq('tenant_id', tenantId)
+      .select('id,is_active').maybeSingle();
+    if (error || !data) {
+      setAutomationNotice(error?.message || 'Status tidak berubah. Periksa izin owner/admin tenant.');
+      return;
+    }
+    setAutomations(items => items.map(a => a.id === id ? { ...a, active: data.is_active === true } : a));
+    setAutomationNotice('Status automation tersimpan di database. Catatan: pengiriman otomatis baru berjalan jika worker/scheduler produksi sudah aktif.');
   }
 
-  function addAutomation() {
-    setAutomations(items => [...items, { id: Date.now(), name: 'Automation Baru', trigger: 'Kondisi bisnis', action: 'Kirim WhatsApp', active: false }]);
+  async function addAutomation() {
+    if (!supabase || !tenantId || tenantState !== 'connected') {
+      setAutomationNotice('Tenant belum siap untuk membuat automation.');
+      return;
+    }
+    setAutomationNotice('');
+    const row = {
+      tenant_id: tenantId,
+      name: 'Konfirmasi Pesanan',
+      trigger_type: 'order_created',
+      action_type: 'send_whatsapp',
+      config: { message: 'Pesanan Anda sudah dicatat. Admin akan segera membantu.' },
+      is_active: false,
+      updated_at: new Date().toISOString()
+    };
+    const { data, error } = await supabase.from('jfs_automations').insert(row)
+      .select('id,name,trigger_type,action_type,config,is_active').single();
+    if (error) {
+      setAutomationNotice('Automation gagal disimpan: ' + error.message);
+      return;
+    }
+    setAutomations(items => [...items, {
+      id: data.id, name: data.name, trigger: 'Pesanan dibuat',
+      action: 'Kirim pesan WhatsApp', active: data.is_active === true,
+      triggerType: data.trigger_type, actionType: data.action_type, config: data.config || {}
+    }]);
+    setAutomationNotice('Automation tersimpan. Mulai dalam keadaan nonaktif agar tidak mengirim pesan sebelum channel dan scheduler siap.');
   }
 
   async function connectWhatsApp() {
@@ -411,9 +486,9 @@ function App() {
           <div className="page-head"><div><span className="eyebrow">KATALOG #2</span><h2>AI Customer Service</h2><p>Pelanggan bisa mendapat jawaban dengan cepat.</p></div><button className="secondary" onClick={() => setTab('home')}>← Dashboard</button></div>
           <div className="grid2">
             <div className="panel">
-              <div className="panel-title"><b>Uji percakapan AI</b><span className="online">● AI Aktif</span></div>
+              <div className="panel-title"><b>Uji percakapan AI</b><span className={aiBusy ? 'status-off' : 'online'}>{aiBusy ? '● Memproses…' : '● Tes via backend'}</span></div>
               <div className="chatbox">{messages.slice(-8).map((m, i) => <div key={i} className={`bubble ${m.role}`}>{m.text}</div>)}</div>
-              <div className="composer"><input value={question} onChange={e => setQuestion(e.target.value)} onKeyDown={e => e.key === 'Enter' && send()} placeholder="Contoh: berapa harga Contoh Produk UMKM?"/><button className="primary" onClick={send}>Kirim</button></div>
+              <div className="composer"><input value={question} onChange={e => setQuestion(e.target.value)} onKeyDown={e => e.key === 'Enter' && send()} placeholder="Contoh: berapa harga Contoh Produk UMKM?"/><button className="primary" onClick={send} disabled={aiBusy || !question.trim()}>{aiBusy ? "Memproses…" : "Kirim"}</button></div>
             </div>
             <div className="panel">
               <div className="panel-title"><b>Sumber informasi AI</b><span className={tenantState === 'connected' ? 'online' : 'status-off'}>{tenantState === 'connected' ? '● Data database' : '● Data demo'}</span></div>
@@ -427,7 +502,10 @@ function App() {
 
         {tab === 'automation' && <section className="page">
           <div className="page-head"><div><span className="eyebrow">KATALOG #3</span><h2>WhatsApp AI Automation</h2><p>Jadikan WhatsApp sebagai asisten bisnis yang membantu melayani pelanggan.</p></div><button className="secondary" onClick={() => setTab('home')}>← Dashboard</button></div>
-          <div className="automation-intro"><div><strong>{activeAutomationCount}</strong><span>automation aktif</span></div><div><strong>{automations.length}</strong><span>workflow tersedia</span></div><button className="primary" onClick={addAutomation}>+ Tambah Automation</button></div>
+          <div className="automation-intro"><div><strong>{activeAutomationCount}</strong><span>automation aktif</span></div><div><strong>{automations.length}</strong><span>workflow tersimpan</span></div><button className="primary" onClick={addAutomation}>+ Tambah Automation</button></div>
+          <div className="notice" role="status">Aturan tersimpan di Supabase. Pengiriman terjadwal belum dapat dijamin karena scheduler produksi WhatsApp belum dikonfigurasi.</div>
+          {automationNotice && <div className="notice" role="status">{automationNotice}</div>}
+          {automations.length === 0 && <div className="panel"><p className="muted">Belum ada aturan automation tersimpan untuk tenant ini. Tambahkan aturan jika diperlukan.</p></div>}
           <div className="automation-list">{automations.map(a => <div className="automation-card" key={a.id}><div className="automation-icon">⚙</div><div className="automation-main"><b>{a.name}</b><span>Jika: {a.trigger}</span><span>Maka: {a.action}</span></div><label className="switch"><input type="checkbox" checked={a.active} onChange={() => toggleAutomation(a.id)}/><span /></label></div>)}</div>
           <div className="automation-examples"><div><b>💬 Menjawab chat</b><span>AI Customer Service menangani pertanyaan pelanggan.</span></div><div><b>🛒 Menerima pesanan</b><span>Pesanan dapat diteruskan ke order engine JFS AI.</span></div><div><b>📝 Mencatat kebutuhan</b><span>Data percakapan dapat disimpan sebagai customer context.</span></div><div><b>⏰ Mengingatkan</b><span>Automation berjalan berdasarkan trigger dan waktu.</span></div><div><b>🔄 Follow-up</b><span>Kirim pesan lanjutan setelah kondisi terpenuhi.</span></div></div>
         </section>}
