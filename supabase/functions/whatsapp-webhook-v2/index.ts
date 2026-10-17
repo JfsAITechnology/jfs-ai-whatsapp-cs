@@ -63,6 +63,30 @@ async function connectionFor(phoneNumberId: string) {
   if (tenantError) throw tenantError;
   if (!tenant || !["active", "trial"].includes(String(tenant.status || "").toLowerCase())) return null;
 
+  // A live channel must also belong to a user with a non-expired WhatsApp CS subscription.
+  const { data: owners, error: ownersError } = await db.from("tenant_users")
+    .select("user_id")
+    .eq("tenant_id", tenant.id)
+    .eq("is_active", true)
+    .in("role", ["owner", "admin"])
+    .not("user_id", "is", null);
+  if (ownersError) throw ownersError;
+  const ownerIds = [...new Set((owners || []).map((owner: any) => owner.user_id).filter(Boolean))];
+  if (!ownerIds.length) return null;
+  const { data: subscriptions, error: subscriptionError } = await db.from("jfs_app_subscriptions")
+    .select("user_id,status,trial_end,expires_at")
+    .in("user_id", ownerIds)
+    .eq("app_code", "WHATSAPP-CS");
+  if (subscriptionError) throw subscriptionError;
+  const now = Date.now();
+  const hasActiveSubscription = (subscriptions || []).some((subscription: any) => {
+    const status = String(subscription.status || "").toLowerCase();
+    const expiryValue = subscription.expires_at || subscription.trial_end;
+    const expiry = expiryValue ? Date.parse(expiryValue) : NaN;
+    return ["trial", "active", "expiring"].includes(status) && Number.isFinite(expiry) && expiry > now;
+  });
+  if (!hasActiveSubscription) return null;
+
   return {
     tenant_id: tenant.id,
     ai_enabled: connection.ai_enabled === true && tenant.ai_enabled === true,
