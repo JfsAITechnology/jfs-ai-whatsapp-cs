@@ -327,7 +327,7 @@ function App() {
     try {
       const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
       if (sessionError || !sessionData?.session) throw new Error('Sesi login tidak ditemukan. Silakan login ulang melalui JFS AI Platform.');
-      const { data, error } = await supabase.functions.invoke('customer-service-bootstrap', {
+      const { data, error } = await supabase.functions.invoke('whatsapp-cs-onboarding', {
         body: {
           business_name: onboarding.business_name.trim(),
           business_type: onboarding.business_type.trim() || 'Usaha lainnya',
