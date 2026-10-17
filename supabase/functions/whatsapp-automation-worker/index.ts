@@ -3,8 +3,15 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const token = Deno.env.get("WHATSAPP_ACCESS_TOKEN") || "";
+const cronToken = Deno.env.get("WHATSAPP_WORKER_CRON_TOKEN") || "";
 const graph = Deno.env.get("WHATSAPP_GRAPH_VERSION") || "v23.0";
-const json = (x: unknown, status = 200) => new Response(JSON.stringify(x), { status, headers: { "content-type": "application/json" } });
+const json = (x: unknown, status = 200) => new Response(JSON.stringify(x), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+function safeEqual(a: string, b: string): boolean {
+  const length = Math.max(a.length, b.length);
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < length; i++) diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
+  return diff === 0;
+}
 async function send(phoneId: string, to: string, text: string) {
   if (!token) throw new Error("WHATSAPP_ACCESS_TOKEN missing");
   const r = await fetch(`https://graph.facebook.com/${graph}/${phoneId}/messages`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ messaging_product: "whatsapp", to, type: "text", text: { body: text } }) });
@@ -13,6 +20,9 @@ async function send(phoneId: string, to: string, text: string) {
 }
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  if (!cronToken) return json({ error: "WHATSAPP_WORKER_CRON_TOKEN is not configured" }, 503);
+  const supplied = (req.headers.get("authorization") || "").replace(/^Bearer\\s+/i, "").trim();
+  if (!safeEqual(supplied, cronToken)) return json({ error: "Unauthorized worker invocation" }, 401);
   if (!token) return json({ error: "WHATSAPP_ACCESS_TOKEN is not configured" }, 503);
   try {
     const { data: jobs, error } = await db.from("jfs_automation_jobs").select("id,tenant_id,contact_id,channel,payload,attempts").eq("channel", "whatsapp").eq("status", "pending").lte("scheduled_at", new Date().toISOString()).order("scheduled_at", { ascending: true }).limit(50);
