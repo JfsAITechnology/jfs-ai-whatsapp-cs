@@ -9,6 +9,7 @@ Architecture:
 - `whatsapp-webhook-v2`: Meta webhook verification, inbound message persistence, customer/conversation creation, product/stock context, AI response, WhatsApp reply, and order creation.
 - `whatsapp-channel-connect`: JWT-protected endpoint; checks tenant owner/admin, asks Meta to validate the configured `phone_number_id`, and stores a verified connection. It does not substitute for configuring the Meta webhook callback.
 - `whatsapp-ai-preview`: authenticated tenant-scoped AI test endpoint used by the dashboard; it requires a valid WhatsApp CS subscription and `OPENAI_API_KEY`.
+- `whatsapp-cs-onboarding`: creates a tenant and owner membership for WhatsApp CS only; it intentionally does not create a legacy `tenant_subscriptions` row. The app trial is started only after the dashboard verifies tenant ownership.
 - `whatsapp-automation-worker`: processes due `jfs_automation_jobs` and sends WhatsApp messages.
 
 ## Required secrets
