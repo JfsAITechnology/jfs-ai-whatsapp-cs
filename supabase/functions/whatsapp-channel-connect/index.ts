@@ -62,6 +62,20 @@ Deno.serve(async (request: Request) => {
       return json({ error: "Hanya pemilik atau admin tenant yang dapat menghubungkan WhatsApp." }, 403);
     }
 
+    const { data: subscription, error: subscriptionError } = await db.from("jfs_app_subscriptions")
+      .select("status,trial_end,expires_at")
+      .eq("user_id", authData.user.id)
+      .eq("app_code", "WHATSAPP-CS")
+      .maybeSingle();
+    if (subscriptionError) throw subscriptionError;
+    const subscriptionStatus = String(subscription?.status || "").toLowerCase();
+    const subscriptionExpiryValue = subscription?.expires_at || subscription?.trial_end;
+    const subscriptionExpiry = subscriptionExpiryValue ? Date.parse(subscriptionExpiryValue) : NaN;
+    if (!["trial", "active", "expiring"].includes(subscriptionStatus) ||
+        !Number.isFinite(subscriptionExpiry) || subscriptionExpiry <= Date.now()) {
+      return json({ error: "Trial atau subscription WhatsApp CS belum aktif atau sudah kedaluwarsa." }, 403);
+    }
+
     const metaResponse = await fetch(
       "https://graph.facebook.com/" + GRAPH_VERSION + "/" + encodeURIComponent(phoneNumberId) +
         "?fields=id,display_phone_number,verified_name",
