@@ -34,7 +34,13 @@ For each tenant, `jfs_channel_connections` must contain `channel='whatsapp'`, th
 
 ## Automation scheduler
 
-`whatsapp-automation-worker` is intentionally protected with JWT. Production scheduling should invoke it from Supabase Cron/pg_cron using an authenticated server-side call. Do not expose the worker as an unauthenticated public endpoint.
+The repository includes `.github/workflows/whatsapp-automation-scheduler.yml`, scheduled every five minutes and available for manual dispatch. The Supabase worker is deployed with JWT gateway verification disabled only because it checks a dedicated high-entropy bearer token inside the function.
+
+Before the scheduler can run, create the same random secret named `WHATSAPP_WORKER_CRON_TOKEN` in:
+1. Supabase Dashboard → Edge Functions → Secrets.
+2. GitHub repository → Settings → Secrets and variables → Actions → New repository secret.
+
+Do not paste the token into source code, issues, or chat. After saving both secrets, run the scheduler workflow manually once and verify it succeeds. It also requires `WHATSAPP_ACCESS_TOKEN` in Supabase Edge Function secrets. The worker processes up to 50 due jobs per invocation; jobs missing a recipient, message body or `phone_number_id` are now marked failed with a reason instead of remaining pending forever.
 
 ## Orders
 
